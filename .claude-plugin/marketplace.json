@@ -1,0 +1,26 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "samalone-plugins",
+  "version": "1.0.0",
+  "description": "Claude Code plugins by Sam Alone",
+  "owner": {
+    "name": "Sam Alone",
+    "email": "samalone@llamagraphics.com"
+  },
+  "metadata": {
+    "description": "Personal Claude Plugin Marketplace for Stuart A. Malone"
+  },
+  "plugins": [
+    {
+      "name": "1password",
+      "description": "Securely work with 1Password through the op CLI. Manage vaults, items, and secrets without exposing plaintext values to Claude.",
+      "version": "1.0.0",
+      "source": {
+        "source": "github",
+        "repo": "samalone/claude-1password-plugin"
+      },
+      "category": "security",
+      "tags": ["1password", "secrets", "credentials", "password-manager", "mcp"]
+    }
+  ]
+}
