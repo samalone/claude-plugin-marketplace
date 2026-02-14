@@ -1,4 +1,4 @@
-# Sam Alone's Claude Code Plugin Marketplace
+# Stuart A. Malone's Claude Code Plugin Marketplace
 
 A collection of Claude Code plugins for developer productivity and security.
 
