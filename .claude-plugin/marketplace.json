@@ -19,7 +19,29 @@
         "repo": "samalone/claude-1password-plugin"
       },
       "category": "security",
-      "tags": ["1password", "secrets", "credentials", "password-manager", "mcp"]
+      "tags": [
+        "1password",
+        "secrets",
+        "credentials",
+        "password-manager",
+        "mcp"
+      ]
+    },
+    {
+      "name": "beads-tools",
+      "description": "Beads (bd) Dolt workflow toolkit: the bd-mode embedded/server switcher CLI, a deterministic config-audit skill + script, git hooks that sync Dolt data on push/pull, and beads workflow-guidance injection.",
+      "source": {
+        "source": "github",
+        "repo": "samalone/beads-tools"
+      },
+      "category": "workflow",
+      "tags": [
+        "beads",
+        "bd",
+        "dolt",
+        "issue-tracking",
+        "workflow"
+      ]
     }
   ]
 }
