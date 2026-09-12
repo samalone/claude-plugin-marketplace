@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "personal-project",
+  "description": "Workflow profile for single-maintainer personal projects: temporary branches instead of PRs, automatic code-review and simplification passes, and merge/cleanup conventions.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Stuart A. Malone",
+    "email": "samalone@llamagraphics.com"
+  },
+  "keywords": ["profile", "workflow", "personal", "git"]
+}

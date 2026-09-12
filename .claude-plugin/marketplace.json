@@ -29,7 +29,7 @@
     },
     {
       "name": "beads-tools",
-      "description": "Beads (bd) Dolt workflow toolkit: the bd-mode embedded/server switcher CLI, a deterministic config-audit skill + script, git hooks that sync Dolt data on push/pull, and beads workflow-guidance injection.",
+      "description": "Beads (bd) Dolt workflow toolkit: the bd-mode embedded/server switcher CLI, a deterministic config-audit skill + script, and git hooks that sync Dolt data on push/pull.",
       "source": {
         "source": "github",
         "repo": "samalone/beads-tools"
@@ -41,6 +41,31 @@
         "dolt",
         "issue-tracking",
         "workflow"
+      ]
+    },
+    {
+      "name": "personal-project",
+      "description": "Workflow profile for single-maintainer personal projects: temporary branches instead of PRs, automatic code-review and simplification passes, and merge/cleanup conventions.",
+      "source": "./plugins/personal-project",
+      "category": "workflow",
+      "tags": [
+        "profile",
+        "workflow",
+        "personal",
+        "git"
+      ]
+    },
+    {
+      "name": "beads-workflow",
+      "description": "Workflow profile for beads (bd) projects: claiming, closing vs. merging, gates, discovered work, and multi-worktree rules. Self-gating — emits nothing unless a .beads/ directory is found.",
+      "source": "./plugins/beads-workflow",
+      "category": "workflow",
+      "tags": [
+        "profile",
+        "workflow",
+        "beads",
+        "bd",
+        "issue-tracking"
       ]
     }
   ]

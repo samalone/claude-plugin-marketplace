@@ -45,7 +45,31 @@ Beads (`bd`) Dolt workflow toolkit: the `bd-mode` embedded/server switcher CLI, 
 - `bd-mode` CLI for switching a project between embedded and server Dolt modes
 - `beads-config-audit` skill + script for deterministic config verification
 - Git hooks that sync Dolt data on push and pull
-- SessionStart injection of shared beads/PR-workflow guidance, activated only in projects that have a `.beads/` directory
+### personal-project
+
+Workflow profile for single-maintainer personal projects: temporary branches instead of PRs, automatic code-review and simplification passes, and merge/cleanup conventions.
+
+- **Category:** Workflow
+- **Source:** embedded — [`plugins/personal-project`](plugins/personal-project)
+- **Install:** `/plugin install personal-project@samalone-plugins`
+
+Enable it per project, in that project's `.claude/settings.json`:
+
+```json
+{ "enabledPlugins": { "personal-project@samalone-plugins": true } }
+```
+
+That file is tracked in git, so the choice travels with the repository.
+
+### beads-workflow
+
+Workflow profile for beads (`bd`) projects: claiming, closing vs. merging, gates, discovered work, and multi-worktree rules.
+
+- **Category:** Workflow
+- **Source:** embedded — [`plugins/beads-workflow`](plugins/beads-workflow)
+- **Install:** `/plugin install beads-workflow@samalone-plugins`
+
+Self-gating: it walks up from the session directory looking for `.beads/` and emits nothing when there is none, so it is safe to enable globally.
 
 ## License
 
