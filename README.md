@@ -33,6 +33,20 @@ Securely work with 1Password through the `op` CLI. Manage vaults, items, and sec
 - Inject secrets into template files
 - Multi-account support
 
+### beads-tools
+
+Beads (`bd`) Dolt workflow toolkit: the `bd-mode` embedded/server switcher CLI, a deterministic config-audit skill + script, git hooks that sync Dolt data on push/pull, and beads workflow-guidance injection.
+
+- **Category:** Workflow
+- **Repository:** [samalone/beads-tools](https://github.com/samalone/beads-tools)
+- **Install:** `/plugin install beads-tools@samalone-plugins`
+
+**Features:**
+- `bd-mode` CLI for switching a project between embedded and server Dolt modes
+- `beads-config-audit` skill + script for deterministic config verification
+- Git hooks that sync Dolt data on push and pull
+- SessionStart injection of shared beads/PR-workflow guidance, activated only in projects that have a `.beads/` directory
+
 ## License
 
 MIT

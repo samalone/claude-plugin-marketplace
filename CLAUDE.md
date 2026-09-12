@@ -33,3 +33,4 @@ Run `claude plugin validate .` to check the marketplace manifest before committi
 ## Plugin Repos
 
 - [claude-1password-plugin](https://github.com/samalone/claude-1password-plugin) — 1Password MCP server
+- [beads-tools](https://github.com/samalone/beads-tools) — beads/Dolt workflow toolkit
