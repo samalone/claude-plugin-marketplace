@@ -71,6 +71,22 @@ Workflow profile for beads (`bd`) projects: claiming, closing vs. merging, gates
 
 Self-gating: it walks up from the session directory looking for `.beads/` and emits nothing when there is none, so it is safe to enable globally.
 
+### beads-config-audit
+
+Audit and repair a beads (`bd`) project's Dolt configuration to a single-user preferred state.
+
+- **Category:** Workflow
+- **Source:** embedded — [`plugins/beads-config-audit`](plugins/beads-config-audit)
+- **Install:** `/plugin install beads-config-audit@samalone-plugins`
+
+A deliberate maintenance operation, not a session-time behaviour — invoke it per project, after a `bd` upgrade, or when you suspect config drift. It checks:
+
+- `issues.jsonl` export off, file untracked and gitignored; `interactions.jsonl` kept but untracked
+- a Dolt remote on `refs/dolt/data`, with the first push actually done
+- `dolt.auto-push` on for embedded (single-writer) projects, off for server mode
+- `backup.git-push` off; `dolt.auto-commit` left at bd's default
+- schema matched to the installed `bd`, and mode-appropriate health checks
+
 ## License
 
 MIT

@@ -67,6 +67,20 @@
         "bd",
         "issue-tracking"
       ]
+    },
+    {
+      "name": "beads-config-audit",
+      "description": "Audit and repair a beads (bd) project's Dolt configuration to a single-user preferred state: JSONL export off, a refs/dolt/data remote, mode-appropriate auto-push, backup git-push off, and clean health checks.",
+      "source": "./plugins/beads-config-audit",
+      "category": "workflow",
+      "tags": [
+        "beads",
+        "bd",
+        "dolt",
+        "config",
+        "audit",
+        "maintenance"
+      ]
     }
   ]
 }
