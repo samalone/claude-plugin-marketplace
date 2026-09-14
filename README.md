@@ -16,6 +16,16 @@ Then install any plugin:
 /plugin install <plugin-name>@samalone-plugins
 ```
 
+Installing is a per-machine step, and it is separate from enabling. A plugin
+that a project opts into via `enabledPlugins` but that has never been installed
+on this machine simply does nothing — the entry alone does not fetch the plugin
+files into the cache.
+
+From a shell rather than a session, the same two steps are `claude plugin
+marketplace add samalone/claude-plugin-marketplace` and `claude plugin install
+<plugin-name>@samalone-plugins`; add `--scope project` to install for one
+project rather than globally.
+
 ## Available Plugins
 
 ### 1Password
