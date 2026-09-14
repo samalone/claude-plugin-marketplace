@@ -44,9 +44,23 @@ jobs:
             claude plugin validate "$d"
           done
 
+      # Install shellcheck from Homebrew rather than using the runner image's
+      # copy: the image ships an older version whose default checks differ from
+      # a local `brew install shellcheck`, so lint failed here on code that was
+      # clean locally. Same source as the test leg, same version as local.
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@df4b09108a1de9d6f995fe68f302b3f68bd6d2ef
+
+      - name: Install shellcheck
+        run: brew install shellcheck
+
+      # -x follows sourced files. plugins/xcode-project's hooks source a shared
+      # library through $CLAUDE_PLUGIN_ROOT, which shellcheck can't resolve
+      # statically; the scripts carry `source-path=SCRIPTDIR source=...`
+      # directives, and those only take effect under -x.
       - name: Shellcheck
         run: |
-          shellcheck plugins/*/scripts/*.sh
+          shellcheck -x plugins/*/scripts/*.sh
           shellcheck -x test/helpers/setup.bash
 
       - name: Syntax check

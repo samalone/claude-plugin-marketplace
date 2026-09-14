@@ -18,6 +18,7 @@ cat >/dev/null 2>&1 || true
 profile="${CLAUDE_PLUGIN_ROOT:-}/profile.md"
 [ -f "$profile" ] || exit 0
 
+# shellcheck source-path=SCRIPTDIR source=lib-xcode-detect.sh
 . "${CLAUDE_PLUGIN_ROOT:-}/scripts/lib-xcode-detect.sh"
 xcode_project_detected || exit 0
 

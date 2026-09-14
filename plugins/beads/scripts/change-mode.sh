@@ -104,7 +104,9 @@ need bd; need git; need jq
 _ctx=$(bd context 2>/dev/null) || _ctx=""
 BEADS_DIR=$(sed -n 's/^[[:space:]]*beads dir:[[:space:]]*//p' <<<"$_ctx")
 BEADS_DIR=${BEADS_DIR%%$'\n'*}      # first match only
-[ -n "$BEADS_DIR" ] && [ -d "$BEADS_DIR" ] || die "could not locate a .beads directory (run inside a beads project)"
+if [ -z "$BEADS_DIR" ] || [ ! -d "$BEADS_DIR" ]; then
+    die "could not locate a .beads directory (run inside a beads project)"
+fi
 REPO_ROOT=$(git -C "$BEADS_DIR" rev-parse --show-toplevel 2>/dev/null) || die "beads dir is not inside a git repository"
 
 META="$BEADS_DIR/metadata.json"

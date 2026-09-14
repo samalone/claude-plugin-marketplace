@@ -1,3 +1,5 @@
+# shellcheck shell=sh
+#
 # Shared Xcode-project detection, sourced by this plugin's SessionStart hooks.
 #
 # A project counts as an Xcode project when a *.xcodeproj or *.xcworkspace

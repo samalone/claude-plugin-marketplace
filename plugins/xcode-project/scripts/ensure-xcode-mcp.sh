@@ -34,6 +34,7 @@ set -eu
 # Drain the hook JSON on stdin so the parent never blocks on a full pipe.
 cat >/dev/null 2>&1 || true
 
+# shellcheck source-path=SCRIPTDIR source=lib-xcode-detect.sh
 . "${CLAUDE_PLUGIN_ROOT:-}/scripts/lib-xcode-detect.sh"
 xcode_project_detected || exit 0
 
