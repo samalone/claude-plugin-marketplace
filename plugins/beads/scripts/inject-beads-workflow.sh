@@ -5,7 +5,7 @@
 # walking up from the session's working directory. This keeps the guidance out
 # of non-beads projects without needing a per-project CLAUDE.md import.
 #
-# Bundled in the beads-workflow plugin and auto-registered via hooks/hooks.json,
+# Bundled in the beads plugin and auto-registered via hooks/hooks.json,
 # so it activates on every machine where the plugin is installed — no per-machine
 # settings.json entry required.
 #

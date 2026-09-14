@@ -70,30 +70,17 @@
       ]
     },
     {
-      "name": "beads-workflow",
-      "description": "Workflow profile for beads (bd) projects: claiming, closing vs. merging, gates, discovered work, and multi-worktree rules. Self-gating — emits nothing unless a .beads/ directory is found.",
-      "source": "./plugins/beads-workflow",
+      "name": "beads",
+      "description": "Everything for beads (bd) projects: self-gating workflow guidance injected at SessionStart, the /beads:plan bead-planning skill, and the /beads:config-audit Dolt configuration audit. The guidance emits nothing unless a .beads/ directory is found.",
+      "source": "./plugins/beads",
       "category": "workflow",
       "tags": [
         "profile",
         "workflow",
         "beads",
         "bd",
-        "issue-tracking"
-      ]
-    },
-    {
-      "name": "beads-config-audit",
-      "description": "Audit and repair a beads (bd) project's Dolt configuration to a single-user preferred state: JSONL export off, a refs/dolt/data remote, mode-appropriate auto-push, backup git-push off, and clean health checks.",
-      "source": "./plugins/beads-config-audit",
-      "category": "workflow",
-      "tags": [
-        "beads",
-        "bd",
         "dolt",
-        "config",
-        "audit",
-        "maintenance"
+        "issue-tracking"
       ]
     }
   ]

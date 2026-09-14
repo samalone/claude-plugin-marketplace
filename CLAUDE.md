@@ -56,9 +56,9 @@ Don't migrate an existing external plugin inward without a concrete reason —
 
 ## Workflow profiles
 
-`personal-project` and `beads-workflow` are **profiles**: plugins whose only job
-is to inject guidance at `SessionStart`. Two selection mechanisms, chosen by
-whether the project carries a detectable signal:
+`personal-project`, `xcode-project`, and `beads` inject guidance at
+`SessionStart`. Two selection mechanisms, chosen by whether the project carries a
+detectable signal:
 
 - **Explicit opt-in** — for policy facts nothing in the tree reveals ("this is a
   single-maintainer personal project"). The project enables the plugin in its own
@@ -67,7 +67,7 @@ whether the project carries a detectable signal:
   ```json
   { "enabledPlugins": { "personal-project@samalone-plugins": true } }
   ```
-- **Self-gating** — for projects with a detectable marker. `beads-workflow` walks
+- **Self-gating** — for projects with a detectable marker. `beads` walks
   up looking for `.beads/`, and `xcode-project` looks for a `*.xcodeproj` or
   `*.xcworkspace` bundle (down to a bounded depth, then up through the parents);
   each emits nothing when it finds none, so both are safe to enable globally.
@@ -75,6 +75,15 @@ whether the project carries a detectable signal:
 The two compose: a globally-enabled self-gating profile plus per-project explicit
 ones. Each profile's emit script drains stdin before writing, so a hook never
 blocks the parent on a full pipe.
+
+**Only the hook self-gates.** A plugin's `skills/` directory is scanned when the
+plugin loads — there is no conditional field in the plugin or marketplace
+manifest, and no hook event that registers a skill — so a self-gating plugin's
+skill descriptions still enter every session's context. That is why `beads`
+bundles its skills with the hook rather than splitting them out: ~300 tokens per
+skill description everywhere buys zero per-project setup, and the skill bodies
+stay lazy. A skill with `disable-model-invocation: true` is hidden from the model
+entirely and costs less still.
 
 ## Validation
 

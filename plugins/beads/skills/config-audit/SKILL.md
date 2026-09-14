@@ -1,5 +1,5 @@
 ---
-name: beads-config-audit
+name: config-audit
 description: >-
     Audit and repair a project's Beads (bd) configuration to my preferred
     single-user Dolt workflow. Use this whenever I ask to check, fix, update,

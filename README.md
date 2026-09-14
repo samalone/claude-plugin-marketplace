@@ -101,31 +101,30 @@ at local scope, so nothing is written into the repository. Two things are worth 
 
 See [Giving external agents access to Xcode](https://developer.apple.com/documentation/xcode/giving-external-agents-access-to-xcode). `xcrun mcpbridge` ships with Xcode 26.1 and later; without it the hook says so instead of adding anything.
 
-### beads-workflow
+### beads
 
-Workflow profile for beads (`bd`) projects: claiming, closing vs. merging, gates, discovered work, and multi-worktree rules.
-
-- **Category:** Workflow
-- **Source:** embedded — [`plugins/beads-workflow`](plugins/beads-workflow)
-- **Install:** `/plugin install beads-workflow@samalone-plugins`
-
-Self-gating: it walks up from the session directory looking for `.beads/` and emits nothing when there is none, so it is safe to enable globally.
-
-### beads-config-audit
-
-Audit and repair a beads (`bd`) project's Dolt configuration to a single-user preferred state.
+Everything for beads (`bd`) projects in one plugin: workflow guidance injected at session start, plus two skills.
 
 - **Category:** Workflow
-- **Source:** embedded — [`plugins/beads-config-audit`](plugins/beads-config-audit)
-- **Install:** `/plugin install beads-config-audit@samalone-plugins`
+- **Source:** embedded — [`plugins/beads`](plugins/beads)
+- **Install:** `/plugin install beads@samalone-plugins`
 
-A deliberate maintenance operation, not a session-time behaviour — invoke it per project, after a `bd` upgrade, or when you suspect config drift. It checks:
+**Workflow guidance (self-gating).** A `SessionStart` hook walks up from the session directory looking for `.beads/` and emits nothing when there is none, so the plugin is safe to install once at the user level. The injected guidance covers claiming, closing vs. merging, gates, discovered work, and multi-worktree rules.
+
+**`/beads:plan <bead-id>`.** Runs a full plan-mode session against one bead and writes the approved plan into that bead's `design` field, for a different session in a different worktree to execute. It never implements. Two frontmatter settings shape how it runs:
+
+- `model: fable` — planning runs on Fable even when the surrounding session is on Opus, with no manual `/model` switch. The override covers the whole skill run, tool-calling turns included. If Fable is not in the account's available models, Claude Code warns and keeps the session model rather than failing.
+- `disable-model-invocation: true` — the skill is slash-only. The model cannot pull it in on its own, which matters for a skill that redirects the session into plan mode on another model.
+
+**`/beads:config-audit`.** A deliberate maintenance operation, not a session-time behaviour — invoke it per project, after a `bd` upgrade, or when you suspect config drift. It checks:
 
 - `issues.jsonl` export off, file untracked and gitignored; `interactions.jsonl` kept but untracked
 - a Dolt remote on `refs/dolt/data`, with the first push actually done
 - `dolt.auto-push` on for embedded (single-writer) projects, off for server mode
 - `backup.git-push` off; `dolt.auto-commit` left at bd's default
 - schema matched to the installed `bd`, and mode-appropriate health checks
+
+Skills cannot self-gate the way the hook does: a plugin's `skills/` directory is scanned when the plugin loads, so both skill descriptions enter every session's context, beads project or not. That cost is small — the bodies stay lazy, and `/beads:plan` is hidden from the model entirely — and it buys zero per-project setup.
 
 ## License
 
