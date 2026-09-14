@@ -119,7 +119,9 @@ Everything for beads (`bd`) projects in one plugin: workflow guidance injected a
 **`/beads:config-audit`.** A deliberate maintenance operation, not a session-time behaviour — invoke it per project, after a `bd` upgrade, or when you suspect config drift. It checks:
 
 - `issues.jsonl` export off, file untracked and gitignored; `interactions.jsonl` kept but untracked
-- a Dolt remote on `refs/dolt/data`, with the first push actually done
+- a Dolt remote on `refs/dolt/data`, with the first push actually done, and its
+  URL on HTTPS rather than SSH — SSH keys held by 1Password make background
+  auto-push succeed or fail according to whether 1Password is unlocked
 - `dolt.auto-push` on for embedded (single-writer) projects, off for server mode
 - `backup.git-push` off; `dolt.auto-commit` left at bd's default
 - schema matched to the installed `bd`, and mode-appropriate health checks

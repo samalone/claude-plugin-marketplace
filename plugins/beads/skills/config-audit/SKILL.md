@@ -8,11 +8,11 @@ description: >-
     oddly or the database seems corrupted or out of date, or when I say my
     config preferences have changed. It verifies the bd version and schema, runs
     the right health checks for the storage mode, turns off issues.jsonl
-    auto-export, ensures a refs/dolt/data remote plus dolt.auto-push on
-    single-writer projects, disables the branch-polluting backup git-push, and
-    confirms everything works. Don't wait for me to spell out each step — invoke
-    this whenever the task is "get this project's Beads config into my preferred
-    state."
+    auto-export, ensures a refs/dolt/data remote over HTTPS rather than SSH plus
+    dolt.auto-push on single-writer projects, disables the branch-polluting
+    backup git-push, and confirms everything works. Don't wait for me to spell
+    out each step — invoke this whenever the task is "get this project's Beads
+    config into my preferred state."
 ---
 
 # Beads config audit
@@ -39,7 +39,10 @@ For a single-user, single-machine project:
 - `interactions.jsonl` (the audit log) kept locally but untracked and gitignored
   — **not** deleted; it's a recovery trail, not a redundant snapshot.
 - A **Dolt remote** on `refs/dolt/data` (normally the same git `origin`), with
-  the first push done so the ref actually exists.
+  the first push done so the ref actually exists — and its URL over **HTTPS,
+  never SSH**. My SSH keys are held by 1Password's agent, so they exist only
+  while 1Password is unlocked and I'm at the machine; a background auto-push
+  over SSH fails unpredictably depending on the lock state and whether I'm AFK.
 - `dolt.auto-push` **ON** for single-writer (embedded) projects, so off-machine
   durability happens in the background — but debounced, not instant (see the
   auto-push note below). **OFF** for server/multi-writer projects (concurrent
@@ -257,11 +260,53 @@ Set each, then confirm with `bd config get`:
 - **Ensure a remote:** check with `bd dolt remote list` (the authoritative
   source — see the display-quirk note above; do not judge this from
   `bd dolt show`). If it _truly_ shows none, add one with
-  `bd dolt remote add origin <git-origin-url>` — that command registers the
-  remote and writes the correct `sync.remote` key into `.beads/config.yaml`
-  itself, so don't hand-edit the config or guess the key name. Then run the
-  first `bd dolt push` to create `refs/dolt/data`, and commit the config change
-  bd wrote so a fresh clone can `bd bootstrap`.
+  `bd dolt remote add origin https://<host>/<owner>/<repo>.git` — that command
+  registers the remote and writes the correct `sync.remote` key into
+  `.beads/config.yaml` itself, so don't hand-edit the config or guess the key
+  name. Build that URL from the repo path rather than copying git `origin`
+  verbatim: if `origin` is itself SSH, copying it walks straight into the
+  problem the next bullet exists to prevent. Then run the first `bd dolt push`
+  to create `refs/dolt/data`, and commit the config change bd wrote so a fresh
+  clone can `bd bootstrap`.
+- **Force the remote onto HTTPS if it's on SSH.** Read the URL in
+  `bd dolt remote list`. Anything of the form `git+ssh://git@host/owner/repo.git`,
+  `ssh://…`, or scp-style `git@host:owner/repo.git` must be replaced; the
+  equivalent is `https://host/owner/repo.git`.
+
+  This is the one remote property worth changing on an otherwise-working
+  project. `dolt.auto-push` fires in the background after `bd` writes, with no
+  one watching — over SSH it depends on 1Password holding my keys, so it
+  succeeds or fails according to whether 1Password happens to be unlocked, and
+  the failures are silent background noise rather than something I'd notice.
+  HTTPS goes through the `osxkeychain` credential helper and the `gh` token
+  instead, which need no unlock.
+
+  There is **no `set-url`** — `bd dolt remote` offers only `add`, `list`, and
+  `remove` (1.2.2) — so the change is remove-then-add:
+
+      bd dolt remote remove origin
+      bd dolt remote add origin https://<host>/<owner>/<repo>.git
+      bd dolt push
+
+  Removing the remote drops only the local registration; it does not touch
+  `refs/dolt/data` on the server or anything in the local database. Then commit
+  the `.beads/config.yaml` change bd wrote.
+
+  Two things **not** to do here:
+
+    - **Don't touch git `origin`.** Git pushes are interactive, so an unlock
+      prompt there is fine — this is only about unattended auto-push. Changing
+      `origin` is a separate decision, and mine to make.
+    - **Don't normalize `https://` to `git+https://` or back.** Both spellings
+      are in use across my projects and both work; `bd dolt remote add` writes
+      the `git+` prefix itself on current versions. Only the *transport*
+      matters — a bare `https://` is not drift.
+
+  Afterwards, apply the duplicate-key check from the top of this skill: the
+  remote lives as either a flat `sync.remote:` or a nested `remote:` under
+  `sync:`, and a remove/add cycle is exactly the sort of thing that can leave
+  both. Grep for `remote:` in `.beads/config.yaml` and confirm exactly one
+  uncommented line.
 - **Auto-push by mode:**
     - Embedded / single-writer → `bd config set dolt.auto-push true`.
     - Server / multi-writer → leave `dolt.auto-push` **off** (concurrent
@@ -331,7 +376,8 @@ Set each, then confirm with `bd config get`:
   clean working set — meaning it prints branch and commit and *no*
   uncommitted-changes output (use `bd vc status`, not `bd vc log`/`bd history`
   — see the command-quirks note).
-- `bd dolt remote list` shows the remote; a `bd dolt push` succeeds.
+- `bd dolt remote list` shows the remote, its URL is HTTPS (no `ssh://`, no
+  `git@`), and a `bd dolt push` succeeds.
 - The git working tree is clean afterward — no stray `.beads/` modifications
   left behind.
 - The Dolt data directory (the `Data:` path from step 1),
