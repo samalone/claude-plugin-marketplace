@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "xcode-project",
   "description": "Workflow profile for Xcode projects: conventions for building, testing, and working with Xcode and Apple platform targets, plus automatic setup of the Xcode MCP server. Self-gating — emits nothing unless a .xcodeproj or .xcworkspace is found.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "Stuart A. Malone",
     "email": "samalone@llamagraphics.com"
