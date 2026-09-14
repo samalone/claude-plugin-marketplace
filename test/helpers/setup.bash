@@ -120,6 +120,20 @@ autopush_line() { grep -E '^dolt\.auto-push:' "$PROJECT/.beads/config.yaml" || t
 # The sync.remote line from the fixture's config.yaml (empty if absent).
 sync_remote_line() { grep -E '^sync\.remote:' "$PROJECT/.beads/config.yaml" || true; }
 
+# Rewrite the fixture's flat `sync.remote:` line into the nested block form —
+# what `bd config set sync.remote` writes when no flat line exists to reuse,
+# which is where a project ends up after the audit's SSH->HTTPS remote repair
+# (`bd dolt remote remove` comments the flat line out). bd reads both; so must
+# the script.
+nest_sync_remote() {
+    local cfg="$PROJECT/.beads/config.yaml" url
+    url=$(sed -n -E 's/^sync\.remote:[[:space:]]*"?([^"]*[^"[:space:]])"?[[:space:]]*$/\1/p' "$cfg")
+    [ -n "$url" ] || { echo "fixture: no flat sync.remote line to nest" >&2; return 1; }
+    sed -e 's/^sync\.remote:/# sync.remote:/' "$cfg" > "$cfg.tmp" && mv -f "$cfg.tmp" "$cfg"
+    append_config_line "sync:"
+    printf '    remote: "%s"\n' "$url" >> "$cfg"
+}
+
 # Content signature of the issue set, stable across a byte-identical DB copy.
 issue_sig() { ( cd "$PROJECT" && bd list --json 2>/dev/null | jq -Sc 'sort_by(.id) | map({id, status})' ); }
 

@@ -136,13 +136,42 @@ data_dir_for() {
     esac
 }
 
-# Read sync.remote from config.yaml, tolerating quoted or unquoted values.
-# Capture then take the first line via parameter expansion (no `| head`, which
-# would SIGPIPE sed under pipefail).
+# Read sync.remote from config.yaml, tolerating quoted or unquoted values and
+# BOTH representations bd writes. `bd config set sync.remote` reuses a flat
+# dotted line when one already exists (what `bd init` writes), but when none
+# does it writes a nested block instead:
+#
+#     sync:
+#         remote: "git+https://github.com/owner/repo.git"
+#
+# A project lands there by following the audit's SSH->HTTPS repair:
+# `bd dolt remote remove` COMMENTS OUT the flat line, so the next write has no
+# flat line to reuse. Parsing only the flat form then read a real, working
+# remote as missing and aborted the switch in pre-flight. Flat wins when both
+# are present, matching bd's own precedence (verified on 1.2.2).
+#
+# Not `bd config get sync.remote`: for a key that isn't set it prints
+# "sync.remote (not set in config.yaml)" on stdout and exits 0, so its output
+# can't be tested for emptiness.
 sync_remote() {
     local _sr
-    _sr=$(sed -n -E 's/^sync\.remote:[[:space:]]*"?([^"]*[^"[:space:]])"?[[:space:]]*$/\1/p' "$CFG" 2>/dev/null)
-    printf '%s' "${_sr%%$'\n'*}"
+    _sr=$(awk '
+        function val(s,   q) {
+            sub(/^[^:]*:[ \t]*/, "", s)         # strip the key, keep colons in the value
+            sub(/[ \t\r]+$/, "", s)
+            q = substr(s, 1, 1)
+            if ((q == "\"" || q == "\047") && substr(s, length(s), 1) == q)
+                s = substr(s, 2, length(s) - 2)
+            return s
+        }
+        # Anchored at column 0, so a commented-out "# sync.remote:" never matches.
+        /^sync\.remote:/            { v = val($0); if (v != "") flat   = v; next }
+        /^sync:[ \t]*$/             { in_sync = 1; next }
+        in_sync && /^[ \t]+remote:/ { v = val($0); if (v != "") nested = v; next }
+        in_sync && /^[^ \t]/        { in_sync = 0 }
+        END { printf "%s", (flat != "" ? flat : nested) }
+    ' "$CFG" 2>/dev/null) || _sr=""
+    printf '%s' "$_sr"
 }
 
 # ---------------------------------------------------------------------------

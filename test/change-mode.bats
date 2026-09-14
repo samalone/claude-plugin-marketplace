@@ -40,6 +40,28 @@ teardown() {
     [ "$(issue_sig)" = "$before" ]
 }
 
+# --- config representations -------------------------------------------------
+
+@test "change-mode: reads sync.remote in the nested block form bd also writes" {
+    make_project --ready
+    nest_sync_remote
+    [ -z "$(sync_remote_line)" ]                        # no flat line left to read
+    ( cd "$PROJECT" && bd config get sync.remote ) | grep -q "$ORIGIN"   # bd still sees it
+
+    # the report surfaces it...
+    run bash -c "cd '$PROJECT' && '$CHANGE_MODE'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"remote:"* ]]
+
+    # ...and pre-flight accepts it rather than aborting with "not configured"
+    run bash -c "cd '$PROJECT' && env -u BEADS_DOLT_AUTO_START '$CHANGE_MODE' server"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"sync.remote is not configured"* ]]
+    [ "$(meta dolt_mode)" = server ]
+    # the nested block survived the config rewrite set_auto_push does
+    grep -qE '^[[:space:]]+remote:' "$PROJECT/.beads/config.yaml"
+}
+
 # --- rollback ---------------------------------------------------------------
 
 @test "change-mode: a failed switch rolls back mode, config, and data" {
