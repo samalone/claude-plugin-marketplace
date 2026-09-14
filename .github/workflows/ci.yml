@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
 
@@ -79,7 +79,7 @@ jobs:
         os: [macos-latest, ubuntu-latest]
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Homebrew on both legs (beads is in homebrew/core; matches local setup).
       # Pinned to a commit SHA (the action publishes no tags) for supply-chain
