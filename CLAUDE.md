@@ -68,8 +68,9 @@ whether the project carries a detectable signal:
   { "enabledPlugins": { "personal-project@samalone-plugins": true } }
   ```
 - **Self-gating** — for projects with a detectable marker. `beads-workflow` walks
-  up looking for `.beads/` and emits nothing when it finds none, so it is safe to
-  enable globally.
+  up looking for `.beads/`, and `xcode-project` looks for a `*.xcodeproj` or
+  `*.xcworkspace` bundle (down to a bounded depth, then up through the parents);
+  each emits nothing when it finds none, so both are safe to enable globally.
 
 The two compose: a globally-enabled self-gating profile plus per-project explicit
 ones. Each profile's emit script drains stdin before writing, so a hook never

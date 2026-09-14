@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/emit-profile.sh\"",
+            "statusMessage": "Loading xcode-project profile"
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-xcode-mcp.sh\"",
+            "statusMessage": "Checking Xcode MCP tools"
+          }
+        ]
+      }
+    ]
+  }
+}

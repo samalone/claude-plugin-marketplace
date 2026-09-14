@@ -71,6 +71,36 @@ Enable it per project, in that project's `.claude/settings.json`:
 
 That file is tracked in git, so the choice travels with the repository.
 
+### xcode-project
+
+Workflow profile for Xcode projects: conventions for building, testing, and working with Xcode and Apple platform targets, plus automatic setup of the Xcode MCP server.
+
+- **Category:** Workflow
+- **Source:** embedded — [`plugins/xcode-project`](plugins/xcode-project)
+- **Install:** `/plugin install xcode-project@samalone-plugins`
+
+Self-gating: it looks for a `*.xcodeproj` or `*.xcworkspace` bundle — scanning down from the project directory to a bounded depth, and up through its parents — and emits nothing when there is none, so it is safe to install once at the user level.
+
+Two things keep that from over-matching:
+
+- **The upward walk stops at the project boundary**, a directory holding `.git` or `.claude` (`.git` may be a file, as it is in a linked worktree). Otherwise it would run to `/`, and one stray workspace in a shared parent such as `~/Projects` would match every project beneath it.
+- **Derived bundles are pruned**, `.swiftpm` above all: Xcode writes `.swiftpm/xcode/package.xcworkspace` into any SwiftPM package it has opened, so without that every such package would read as an Xcode project. `DerivedData`, `.build`, `Carthage`, `build`, and `node_modules` are pruned too.
+
+The signal is deliberately narrower than "Swift": a SwiftPM package or a server-side Swift repo has no hand-authored `.xcodeproj` and stays silent.
+
+**Xcode MCP tools.** In an Xcode project with no `xcode` MCP server configured, the plugin runs Apple's documented setup for you:
+
+```
+claude mcp add --transport stdio xcode -- xcrun mcpbridge
+```
+
+at local scope, so nothing is written into the repository. Two things are worth knowing:
+
+- **The tools are not live in the session that adds them.** MCP servers connect before `SessionStart` hooks run, so they appear on the next session in that project. The hook says so in its output, so the session doesn't plan around tools it doesn't have.
+- **The Xcode side is manual.** Xcode > Settings > Intelligence > "Allow external agents to use Xcode tools" must be on, with the project open in Xcode. It is a GUI toggle that writes no readable defaults key, so the plugin reports it as a prerequisite rather than checking it.
+
+See [Giving external agents access to Xcode](https://developer.apple.com/documentation/xcode/giving-external-agents-access-to-xcode). `xcrun mcpbridge` ships with Xcode 26.1 and later; without it the hook says so instead of adding anything.
+
 ### beads-workflow
 
 Workflow profile for beads (`bd`) projects: claiming, closing vs. merging, gates, discovered work, and multi-worktree rules.

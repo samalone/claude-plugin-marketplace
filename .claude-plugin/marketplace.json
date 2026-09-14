@@ -56,6 +56,20 @@
       ]
     },
     {
+      "name": "xcode-project",
+      "description": "Workflow profile for Xcode projects: conventions for building, testing, and working with Xcode and Apple platform targets, plus automatic setup of the Xcode MCP server. Self-gating — emits nothing unless a .xcodeproj or .xcworkspace is found.",
+      "source": "./plugins/xcode-project",
+      "category": "workflow",
+      "tags": [
+        "profile",
+        "workflow",
+        "xcode",
+        "apple",
+        "ios",
+        "macos"
+      ]
+    },
+    {
       "name": "beads-workflow",
       "description": "Workflow profile for beads (bd) projects: claiming, closing vs. merging, gates, discovered work, and multi-worktree rules. Self-gating — emits nothing unless a .beads/ directory is found.",
       "source": "./plugins/beads-workflow",
