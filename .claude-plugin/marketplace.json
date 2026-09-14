@@ -28,22 +28,6 @@
       ]
     },
     {
-      "name": "beads-tools",
-      "description": "Beads (bd) Dolt workflow toolkit: the bd-mode embedded/server switcher CLI, a deterministic config-audit skill + script, and git hooks that sync Dolt data on push/pull.",
-      "source": {
-        "source": "github",
-        "repo": "samalone/beads-tools"
-      },
-      "category": "workflow",
-      "tags": [
-        "beads",
-        "bd",
-        "dolt",
-        "issue-tracking",
-        "workflow"
-      ]
-    },
-    {
       "name": "personal-project",
       "description": "Workflow profile for single-maintainer personal projects: temporary branches instead of PRs, automatic code-review and simplification passes, and merge/cleanup conventions.",
       "source": "./plugins/personal-project",
@@ -57,7 +41,7 @@
     },
     {
       "name": "xcode-project",
-      "description": "Workflow profile for Xcode projects: conventions for building, testing, and working with Xcode and Apple platform targets, plus automatic setup of the Xcode MCP server. Self-gating — emits nothing unless a .xcodeproj or .xcworkspace is found.",
+      "description": "Workflow profile for Xcode projects: conventions for building, testing, and working with Xcode and Apple platform targets, plus automatic setup of the Xcode MCP server. Self-gating \u2014 emits nothing unless a .xcodeproj or .xcworkspace is found.",
       "source": "./plugins/xcode-project",
       "category": "workflow",
       "tags": [
@@ -71,7 +55,7 @@
     },
     {
       "name": "beads",
-      "description": "Everything for beads (bd) projects: self-gating workflow guidance injected at SessionStart, the /beads:plan bead-planning skill, and the /beads:config-audit Dolt configuration audit. The guidance emits nothing unless a .beads/ directory is found.",
+      "description": "Everything for beads (bd) projects: self-gating workflow guidance injected at SessionStart, the /beads:plan bead-planning skill, the /beads:config-audit Dolt configuration audit, and the /beads:change-mode embedded/server switcher. The guidance emits nothing unless a .beads/ directory is found.",
       "source": "./plugins/beads",
       "category": "workflow",
       "tags": [

@@ -43,18 +43,6 @@ Securely work with 1Password through the `op` CLI. Manage vaults, items, and sec
 - Inject secrets into template files
 - Multi-account support
 
-### beads-tools
-
-Beads (`bd`) Dolt workflow toolkit: the `bd-mode` embedded/server switcher CLI, a deterministic config-audit skill + script, git hooks that sync Dolt data on push/pull, and beads workflow-guidance injection.
-
-- **Category:** Workflow
-- **Repository:** [samalone/beads-tools](https://github.com/samalone/beads-tools)
-- **Install:** `/plugin install beads-tools@samalone-plugins`
-
-**Features:**
-- `bd-mode` CLI for switching a project between embedded and server Dolt modes
-- `beads-config-audit` skill + script for deterministic config verification
-- Git hooks that sync Dolt data on push and pull
 ### personal-project
 
 Workflow profile for single-maintainer personal projects: temporary branches instead of PRs, automatic code-review and simplification passes, and merge/cleanup conventions.
@@ -103,7 +91,7 @@ See [Giving external agents access to Xcode](https://developer.apple.com/documen
 
 ### beads
 
-Everything for beads (`bd`) projects in one plugin: workflow guidance injected at session start, plus two skills.
+Everything for beads (`bd`) projects in one plugin: workflow guidance injected at session start, plus three skills.
 
 - **Category:** Workflow
 - **Source:** embedded — [`plugins/beads`](plugins/beads)
@@ -126,7 +114,15 @@ Everything for beads (`bd`) projects in one plugin: workflow guidance injected a
 - `backup.git-push` off; `dolt.auto-commit` left at bd's default
 - schema matched to the installed `bd`, and mode-appropriate health checks
 
-Skills cannot self-gate the way the hook does: a plugin's `skills/` directory is scanned when the plugin loads, so both skill descriptions enter every session's context, beads project or not. That cost is small — the bodies stay lazy, and `/beads:plan` is hidden from the model entirely — and it buys zero per-project setup.
+**`/beads:change-mode [embedded|server]`.** Switches the project's Dolt database between embedded mode (`.beads/embeddeddolt/`) and project-server mode (`.beads/dolt/`). The modes are not interchangeable — server mode is noticeably faster, embedded mode has no server process to manage — so this is a deliberate choice, and `disable-model-invocation: true` keeps the skill slash-only so the model can never switch modes on its own initiative. `/beads:config-audit` treats either mode as acceptable precisely so it never second-guesses that choice.
+
+Because the two modes keep their database in different directories, a switch is a physical transfer rather than a config flag. `scripts/change-mode.sh` pushes `refs/dolt/data` first so an off-machine copy exists, backs the database up to a temp directory, copies it across (falling back to `bd bootstrap` from the remote), flips `dolt.auto-push` to match the mode — on for single-writer embedded, off for server, where concurrent auto-push can corrupt remote history — and verifies a per-issue `{id, status, updated_at}` fingerprint against the pre-switch value. Any failure rolls back the mode, config, and data, and restarts a server it had stopped. It never commits: `metadata.json` and `config.yaml` are left modified for you to review.
+
+Git hooks are out of scope by design. `bd init` and `bd hooks install` own the beads git hooks, and the plugin defers to them rather than writing sync sections of its own.
+
+With no argument the skill reports the current mode and changes nothing.
+
+Skills cannot self-gate the way the hook does: a plugin's `skills/` directory is scanned when the plugin loads, so the skill descriptions enter every session's context, beads project or not. That cost is small — the bodies stay lazy, and `/beads:plan` and `/beads:change-mode` are hidden from the model entirely — and it buys zero per-project setup.
 
 ## License
 

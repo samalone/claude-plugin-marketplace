@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Manifest + shell linting. Cheap, no bd required, so it gates every push on
+  # its own rather than riding along with the slow bats leg.
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Claude Code CLI
+        # Pinned (not @latest) so a CLI release can't change validate behavior
+        # mid-stream; bump deliberately.
+        run: npm install -g @anthropic-ai/claude-code@2.1.218
+
+      # `validate <dir>` checks one manifest: the marketplace manifest at the
+      # repo root, and the plugin manifest inside each embedded plugin. Run it
+      # for each, or a broken plugins/*/plugin.json passes unnoticed.
+      - name: Validate marketplace and plugin manifests
+        run: |
+          set -euo pipefail
+          claude plugin validate .
+          for d in plugins/*/; do
+            echo "--- $d"
+            claude plugin validate "$d"
+          done
+
+      - name: Shellcheck
+        run: |
+          shellcheck plugins/*/scripts/*.sh
+          shellcheck -x test/helpers/setup.bash
+
+      - name: Syntax check
+        run: bash -n plugins/*/scripts/*.sh
+
+  # The change-mode suite spins real bd + Dolt servers in throwaway fixtures, so
+  # it is slower and needs a bd install. macOS = BSD userland (the primary
+  # platform); Linux = GNU userland, the leg that catches BSD-isms (sed -i '',
+  # readlink -f, etc.).
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # Homebrew on both legs (beads is in homebrew/core; matches local setup).
+      # Pinned to a commit SHA (the action publishes no tags) for supply-chain
+      # safety; bump deliberately.
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@df4b09108a1de9d6f995fe68f302b3f68bd6d2ef
+
+      - name: Install bd and bats-core
+        run: brew install beads bats-core
+
+      # change-mode.sh refuses to run outside the versions its commands and
+      # output-parsing were verified against. Fail loudly here rather than
+      # letting the suite report a confusing switch failure.
+      - name: Assert bd is within the supported range
+        run: |
+          v=$(bd version | awk '{print $3; exit}')
+          echo "bd $v"
+          case "$v" in
+            1.1.*|1.2.*) ;;
+            *) echo "::error::change-mode.sh is verified for bd 1.1.x-1.2.x but the runner has $v — re-verify the bd commands it depends on, then widen the gate in plugins/beads/scripts/change-mode.sh"; exit 1 ;;
+          esac
+
+      # Fixtures live under $HOME (bd rejects /tmp-family locations as unsafe);
+      # the runner home is bd-safe.
+      - name: Run bats suite
+        run: bats test/

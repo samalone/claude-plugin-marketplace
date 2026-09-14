@@ -18,11 +18,16 @@ Both work; pick by whether the plugin needs its own infrastructure.
   profiles.
 - **External** (`"source": {"source": "github", "repo": "..."}`) — for plugins
   that already carry their own CI, test suite, or beads database, where folding
-  them in would mean migrating that infrastructure for no gain. `beads-tools`
-  and `claude-1password-plugin` are external for exactly this reason.
+  them in would mean migrating that infrastructure for no gain.
+  `claude-1password-plugin` is external for exactly this reason.
 
-Don't migrate an existing external plugin inward without a concrete reason —
-`beads-tools` in particular has a Dolt remote pointing at its own repo.
+Don't migrate an existing external plugin inward without a concrete reason. The
+reason that justified it for `beads-tools` was that the repo had been hollowed
+out: its skill and its hook had already moved here, leaving two shell scripts
+whose only consumer was this plugin. A two-repo split costs a real invariant —
+its `bd-mode` verified a configuration that the audit skill, by then living here,
+no longer installed, and the bats harness went on calling a script that had been
+deleted. Weigh that seam, not just the infrastructure.
 
 ## Adding a Plugin
 
@@ -89,7 +94,28 @@ entirely and costs less still.
 
 Run `claude plugin validate .` to check the marketplace manifest before committing.
 
+CI (`.github/workflows/ci.yml`) runs that validator plus `shellcheck` on every
+push, and the [bats](https://github.com/bats-core/bats-core) suite in `test/` on
+macOS **and** Linux. The suite spins real `bd` + Dolt servers in throwaway
+fixtures under `$HOME` (bd refuses `/tmp`-family "unsafe" locations; override the
+base with `BD_TESTS_TMPDIR`) and never touches a live repo. Locally:
+
+```bash
+brew install bats-core shellcheck jq          # bd 1.1.x-1.2.x must already be installed
+claude plugin validate .
+shellcheck plugins/*/scripts/*.sh && shellcheck -x test/helpers/setup.bash
+bats test/                                    # ~3 min
+```
+
+Two traps the fixtures hit, worth knowing before editing them:
+
+- **`bd init` writes `.beads/config.yaml` with no trailing newline.** A naive
+  `>>` append lands on the end of the `sync.remote` line and silently corrupts
+  it. Use the harness's `append_config_line`.
+- **The audit is a skill, not a script.** `prepare_for_switch` in the harness
+  reimplements only the preconditions `change-mode.sh` checks, because a skill
+  can't be invoked from a test. Keep it in sync with that script's Phase A.
+
 ## Plugin Repos
 
 - [claude-1password-plugin](https://github.com/samalone/claude-1password-plugin) — 1Password MCP server
-- [beads-tools](https://github.com/samalone/beads-tools) — beads/Dolt workflow toolkit
