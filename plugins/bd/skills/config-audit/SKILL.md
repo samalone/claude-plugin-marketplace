@@ -489,12 +489,47 @@ Set each, then confirm with `bd config get`:
   `<!-- BEGIN BEADS INTEGRATION -->` is the pre-versioned format. A stale block
   can carry instructions bd itself has since retracted — notably a "MANDATORY
   WORKFLOW" mandating `git pull --rebase`, which contradicts my plain-merge
-  rule. Compare the live template against the file with
-  `bd setup codex --print` (read-only, prints to stdout; do **not** use
-  `bd setup claude`, which would add a managed block to a `CLAUDE.md` that has
-  none). **Report the drift and propose regenerating; don't regenerate
-  unasked** — it replaces user-visible repo content, so it's my call per
-  project.
+  rule.
+
+  **Refreshing the block: use `bd setup factory` (or `opencode`).** Both are
+  `TypeSection` recipes on `AGENTS.md` in `internal/recipes/recipes.go`, and
+  their rendered bodies are byte-identical (verified with `diff` on 1.3.0), so
+  the recipe name is only a label for which tool you are nominally
+  configuring — pick either and stay consistent. `--check` reports the state
+  ("installed but stale" means it found the block and will replace it, even a
+  bare pre-versioned marker, because `ReplaceSectionWithOpts` matches the
+  BEGIN marker by *prefix*). `--print` previews the body, read-only, without
+  markers.
+
+  Two recipes to avoid:
+    - **`bd setup codex`** writes a *different* marker pair
+      (`BEGIN BEADS CODEX SETUP`), so it adds a second block alongside the
+      existing one, plus `.agents/skills/beads/SKILL.md` and `.codex/` files.
+    - **`bd setup claude`** wants to add a beads section to `CLAUDE.md`
+      (`--check`: "CLAUDE.md exists but no beads section found"), which is
+      unwanted on a project whose `CLAUDE.md` is hand-written. Reassuringly it
+      no longer fights the plugin — `--check` reports "Hooks provided by beads
+      plugin (plugin-managed)", so it will not re-add a `bd prime` hook to
+      `settings.json` and re-create the double-prime.
+
+  **Regeneration only reaches the marked block — this is the trap.**
+  `ReplaceSectionWithOpts` rebuilds `content[:beginIdx] + <fresh section> +
+  content[endOfEndMarker:]`, so everything *before* BEGIN and *after* END
+  survives verbatim. An older `bd` wrote AGENTS.md as a whole-file template
+  before the markers existed; a later `bd` wrapped only part of it. The residue
+  above the BEGIN marker is user-authored territory as far as bd is concerned,
+  and it **never** gets updated. On life-balance that residue was a *duplicate*
+  of the entire "Landing the Plane / MANDATORY WORKFLOW / `git pull --rebase`"
+  section: once at line 26 (outside the block, permanent) and again at line 138
+  (inside, replaceable). So refreshing the block fixes half the problem and
+  silently leaves the half that contradicts my merge rule.
+
+  Therefore: **refresh the block as ordinary bd-managed drift** — it is the
+  same category as the gitignores and the hooks, and bd's marker discipline
+  makes it safe. Then **grep the pre-marker region for duplicated or retracted
+  guidance** (`rebase`, `MANDATORY`, `Landing the Plane`) and report what you
+  find with line numbers. Deleting that region is a content decision about a
+  tracked, human-readable file: **propose it, don't do it unasked.**
 
 - **Add the memory division-of-labor note to the project's `CLAUDE.md`.**
   `bd prime` is injected at every SessionStart and PreCompact, and its Core
