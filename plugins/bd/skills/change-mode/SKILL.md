@@ -48,6 +48,26 @@ servers, moves data directories, and holds rollback state in a trap. If it fails
 read the error and report it; do not re-run it to "try again" until you
 understand why it failed, and never run two invocations concurrently.
 
+## The one refusal you will hit on a fleet upgrade
+
+**"schema does not match this bd binary (pending migration)" on a store that is
+already at the right schema.** The script gates on `bd migrate --dry-run`
+printing `Version matches` (`change-mode.sh:298-300`). That check fails on a
+**stale `bd_version` stamp** in `local_metadata`, not only on real pending DDL —
+so a store sitting at v66 with a stamp still reading `1.2.2` is refused even
+though its schema is correct and there is nothing to migrate.
+
+The fix is plain `bd migrate`: it updates the stamp and nothing else — no DDL,
+no data rewrite — and `local_metadata` is dolt-ignored, so the change does not
+travel to other clones. Then re-run the switch.
+
+Expect this on **every** store after the binary moves to a new minor version,
+not on the odd one: the stamp is written when a store is opened by a given
+binary, so a fleet upgrade leaves every store stale until each is touched. Four
+of four needed it on the Windows machine after 1.2.2 → 1.3.0 (reported by that
+session, 2026-09-17). Do not read the message as schema damage, and do not
+reach for `--ignore-schema-skew`.
+
 ## What it does, so you can interpret its output
 
 1. **Pre-flight (read-only).** Checks the bd version, `backend: dolt`, a git
