@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "bd",
   "description": "Additions to the public beads plugin, not a replacement for it: self-gating PR-workflow guidance, the /bd:plan bead-planning skill, the /bd:config-audit Dolt configuration audit, and the /bd:change-mode embedded/server mode switcher.",
-  "version": "3.10.0",
+  "version": "3.10.1",
   "author": {
     "name": "Stuart A. Malone",
     "email": "samalone@llamagraphics.com"

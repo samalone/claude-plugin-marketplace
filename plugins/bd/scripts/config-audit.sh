@@ -617,7 +617,7 @@ else
     if [ "${_n:-0}" -eq 0 ]; then
         f_fail "claudemd.memory-note" "absent — append it AFTER the '<!-- END BEADS INTEGRATION -->' marker (anything between the markers is regenerated away)"
     elif [ "${_n:-0}" -gt 1 ]; then
-        f_fail "claudemd.memory-note" "present $_n times — should appear exactly once"
+        f_warn "claudemd.memory-note" "present $_n times — should appear exactly once. Not auto-repaired: choosing which copy to keep, and where its section ends, is a content call on a tracked file."
     else
         _endm=$(awk '/<!-- END BEADS INTEGRATION/ { print NR; exit }' "$CLAUDEMD")
         _notel=$(awk -v s="$MEMNOTE" 'index($0, s) { print NR; exit }' "$CLAUDEMD")
@@ -664,6 +664,13 @@ if [ "$DOCTOR_OK" = 1 ]; then
     else
         f_ok "verify.dolt-clean" "Dolt Status and Dolt Locks both pass"
     fi
+else
+    # Embedded mode has no doctor, so there is no authoritative cleanliness
+    # signal at all. Say so rather than leaving the check silently absent —
+    # `bd vc status` under-reports (measured on 1.3.0: it read as clean while
+    # doctor reported `config: modified` in the same instant), so its silence
+    # here is not evidence of a clean working set.
+    f_info "verify.dolt-clean" "not checkable in embedded mode (doctor is unsupported there); \`bd vc status\` under-reports config-table changes, so treat its silence as no signal"
 fi
 
 _gst=$(git -C "$REPO_ROOT" status --short 2>/dev/null) || _gst=""
@@ -696,7 +703,6 @@ config.dolt.auto-push
 config.backup.git-push
 config.doctor.suppress.dolt-remote-vs-git-origin
 config.doctor.suppress.cursor-integration
-verify.dolt-clean
 files.issues-jsonl
 files.interactions-jsonl
 gitignore.dolt-server-config
@@ -747,25 +753,35 @@ set_yaml_key() {   # <dotted.key> <bare-value>
 }
 
 # scp-style and ssh:// URLs to their https:// equivalent. Only the transport is
-# normalized — the git+ prefix is left exactly as found, because both spellings
-# are in use, both work, and bd writes git+ itself on current versions.
+# normalized — the git+ prefix is carried through unchanged, because both
+# spellings are in use, both work, and bd rewrites it to git+ itself anyway.
 to_https() {   # <url>
-    local u=$1 pre=""
+    local u=$1 pre="" head after
     case "$u" in git+*) pre="git+"; u=${u#git+} ;; esac
     case "$u" in
-        ssh://*)  u=${u#ssh://} ;;
         https://*) printf '%s%s' "$pre" "$u"; return ;;
+        ssh://*)   u=${u#ssh://} ;;
         *) : ;;
     esac
-    u=${u#git@}                      # user prefix, scp-style or not
-    case "$u" in *@*) u=${u#*@} ;; esac
-    # scp-style separates host from path with ':' rather than '/'
-    case "$u" in
-        */*) : ;;
-        *:*) u="${u%%:*}/${u#*:}" ;;
+    case "$u" in *@*) u=${u#*@} ;; esac          # drop any user@ prefix
+    # A ':' before the first '/' means one of two different things, and the
+    # discriminator is whether what follows it is numeric:
+    #   scp-style  git@host:me/repo.git   -> ':' separates host from PATH
+    #   ssh + port ssh://host:2222/me/... -> ':' introduces a PORT
+    # Conflating them corrupts the URL in one direction or the other. Testing
+    # only for a '/' anywhere is not enough: the scp-style path contains one, so
+    # host:me/repo.git read as a port form and silently lost the "me" segment.
+    head=${u%%/*}
+    case "$head" in
+        *:*)
+            after=${head#*:}
+            case "$after" in
+                ''|*[!0-9]*) u="${u%%:*}/${u#*:}" ;;      # path: promote to '/'
+                *)           u="${u%%:*}${u#"$head"}" ;;  # port: drop it
+            esac ;;
+        *) : ;;
     esac
-    u=$(printf '%s' "$u" | sed 's/:/\//')
-    printf 'https://%s' "$u"
+    printf '%s%s%s' "$pre" "https://" "$u"
 }
 
 apply_one() {
@@ -785,9 +801,15 @@ apply_one() {
             https://*|git+https://*) ;;
             *) skipped "no remote: could not derive an HTTPS URL from origin ($gurl)"; return 0 ;;
         esac
+        # --allow-git-origin is REQUIRED, not optional. bd 1.3.0 aborts with
+        # "refusing to add ... this URL matches the git origin" for both the
+        # https:// and git+https:// spellings — and a Dolt remote that IS the git
+        # origin is precisely the target state here, which is why the audit
+        # suppresses bd's own Dolt-Remote-vs-Git-Origin warning. Without the flag
+        # this repair could never succeed on a normal single-repo layout.
         # `bd dolt remote add` writes the correct sync.remote key itself, so the
         # config is never hand-edited or the key name guessed.
-        bd dolt remote add origin "$hurl" >/dev/null 2>&1 \
+        bd dolt remote add origin "$hurl" --allow-git-origin >/dev/null 2>&1 \
             || { skipped "no remote: \`bd dolt remote add\` failed"; return 0; }
         REMOTE_URL=$hurl
         did "added Dolt remote origin -> $hurl" ;;
@@ -800,10 +822,21 @@ apply_one() {
         # refs/dolt/data on the server or anything in the local database.
         bd dolt remote remove origin >/dev/null 2>&1 \
             || { skipped "SSH remote: \`bd dolt remote remove\` failed"; return 0; }
-        bd dolt remote add origin "$hurl" >/dev/null 2>&1 \
-            || die "removed the SSH remote but could not add the HTTPS one ($hurl) — re-add it before doing anything else"
-        did "moved the Dolt remote from SSH to HTTPS: $REMOTE_URL -> $hurl"
-        REMOTE_URL=$hurl ;;
+        # If the add fails we must put back what we removed. Without this, a
+        # refused add leaves the project with NO Dolt remote at all — severing
+        # the only off-machine copy of the beads data, which is the exact
+        # outcome this whole script exists to prevent. (bd refuses a URL
+        # matching the git origin unless --allow-git-origin is passed, so this
+        # was not a hypothetical: it failed every time on a normal layout.)
+        if bd dolt remote add origin "$hurl" --allow-git-origin >/dev/null 2>&1; then
+            did "moved the Dolt remote from SSH to HTTPS: $REMOTE_URL -> $hurl"
+            REMOTE_URL=$hurl
+        elif bd dolt remote add origin "$REMOTE_URL" --allow-git-origin >/dev/null 2>&1; then
+            skipped "SSH remote: could not add the HTTPS URL ($hurl); restored the original SSH remote, nothing lost"
+        else
+            die "removed the Dolt remote and could not restore it. Re-add it NOW before running anything else:
+       bd dolt remote add origin '$REMOTE_URL' --allow-git-origin"
+        fi ;;
 
     remote.ref)
         if bd dolt push >/dev/null 2>&1; then
@@ -834,33 +867,27 @@ apply_one() {
         local key=${1#config.}
         bd config set "$key" true >/dev/null 2>&1 || { skipped "$key: \`bd config set\` failed"; return 0; }
         if [ "$(bdcfg "$key")" = true ]; then
+            DB_WROTE=1
             did "set $key=true (db-resident; travels on refs/dolt/data)"
         else
             skipped "$key: set reported success but \`bd config get\` does not agree"
         fi ;;
 
-    verify.dolt-clean)
-        # Writing the suppress keys dirties the config table in the Dolt working
-        # set, which surfaces as Dolt Status / Dolt Locks warnings. Clear it here
-        # rather than leaving it to bd's "auto-commit on next command": a dirty
-        # working set is the state that blocks migrations.
-        if bd vc commit -m "config-audit: bring config into the audited state" >/dev/null 2>&1; then
-            did "committed the Dolt working set"
-            bd dolt push >/dev/null 2>&1 && did "pushed the config commit"
-        else
-            skipped "Dolt working set: \`bd vc commit\` failed"
-        fi ;;
-
     files.issues-jsonl)
         # Re-check durability here rather than trusting an earlier step in this
         # list: this is the one repair that destroys data.
-        local ref; ref=$(git -C "$REPO_ROOT" ls-remote origin refs/dolt/data 2>/dev/null) || ref=""
-        if [ -z "$ref" ]; then
-            skipped "issues.jsonl: origin still has no refs/dolt/data, so this file may be the only off-machine copy — NOT removing it"
-            return 0
-        fi
-        local rel; rel=$(relp "$ISSUES")
-        if is_tracked "$rel"; then
+        #
+        # The guard covers ONLY the deletion. The most common form of this
+        # finding is "absent but not gitignored", where there is nothing to
+        # delete and the whole repair is one line in .gitignore — returning
+        # early there left the finding permanently unfixable on any project
+        # without a pushed ref.
+        local ref rel
+        ref=$(git -C "$REPO_ROOT" ls-remote origin refs/dolt/data 2>/dev/null) || ref=""
+        rel=$(relp "$ISSUES")
+        if [ -z "$ref" ] && { is_tracked "$rel" || [ -f "$ISSUES" ]; }; then
+            skipped "issues.jsonl: origin has no refs/dolt/data, so this file may be the only off-machine copy — NOT removing it (the gitignore entry is still added)"
+        elif is_tracked "$rel"; then
             if git -C "$REPO_ROOT" rm -f --quiet -- "$rel" >/dev/null 2>&1; then
                 did "git rm'd $rel (staged, not committed)"
             else
@@ -869,7 +896,10 @@ apply_one() {
         elif [ -f "$ISSUES" ]; then
             rm -f "$ISSUES" && did "deleted untracked $rel"
         fi
-        is_ignored "$rel" || { append_line "$REPO_ROOT/.gitignore" ".beads/issues.jsonl"; did "gitignored .beads/issues.jsonl"; } ;;
+        # Use the repo-relative path the checks use, not a hardcoded
+        # ".beads/issues.jsonl": a .beads below the repo root would otherwise get
+        # a pattern that never matches the file it is meant to cover.
+        is_ignored "$rel" || { append_line "$REPO_ROOT/.gitignore" "$rel"; did "gitignored $rel"; } ;;
 
     files.interactions-jsonl)
         # NOT the same kind of thing as issues.jsonl: an append-only audit log
@@ -883,7 +913,7 @@ apply_one() {
                 skipped "interactions.jsonl: \`git rm --cached\` failed"
             fi
         fi
-        is_ignored "$rel" || { append_line "$REPO_ROOT/.gitignore" ".beads/interactions.jsonl"; did "gitignored .beads/interactions.jsonl"; } ;;
+        is_ignored "$rel" || { append_line "$REPO_ROOT/.gitignore" "$rel"; did "gitignored $rel"; } ;;
 
     gitignore.dolt-server-config)
         append_line "$BEADS_DIR/.gitignore" 'dolt-server-config.yaml'
@@ -904,9 +934,13 @@ apply_one() {
     agents.optout)
         if [ "$AG_MODE" = 120000 ]; then
             # One file wearing two names: the comment's own text is false here.
-            awk -v s="$OPTOUT" 'index($0, s) == 0 { print }' "$CLAUDEMD" > "$CLAUDEMD.tmp$$" \
-                && mv -f "$CLAUDEMD.tmp$$" "$CLAUDEMD"
-            did "removed the false divergence opt-out from CLAUDE.md (AGENTS.md is a symlink to it)"
+            if awk -v s="$OPTOUT" 'index($0, s) == 0 { print }' "$CLAUDEMD" > "$CLAUDEMD.tmp$$" \
+               && mv -f "$CLAUDEMD.tmp$$" "$CLAUDEMD"; then
+                did "removed the false divergence opt-out from CLAUDE.md (AGENTS.md is a symlink to it)"
+            else
+                rm -f "$CLAUDEMD.tmp$$"
+                skipped "opt-out: could not rewrite CLAUDE.md"
+            fi
         elif [ -f "$AGENTS" ]; then
             append_line "$AGENTS" "$OPTOUT"
             did "appended the divergence opt-out to AGENTS.md"
@@ -927,6 +961,13 @@ apply_one() {
 
     claudemd.memory-note)
         [ -f "$CLAUDEMD" ] || { skipped "memory note: no CLAUDE.md at the repo root"; return 0; }
+        # Append ONLY when the note is genuinely absent. The check also fires for
+        # "present N times", and appending there made the duplication worse on
+        # every run — two copies became three, three became four.
+        if grep -qF "$MEMNOTE" "$CLAUDEMD" 2>/dev/null; then
+            skipped "memory note: already present — not appending another copy"
+            return 0
+        fi
         # Appended at the END, which is after bd's END marker wherever that sits.
         # Anything written between the markers is regenerated away.
         append_line "$CLAUDEMD" ''
@@ -983,12 +1024,38 @@ if [ "$APPLY" = 1 ]; then
             printf '  %-46s %s\n' "$_id" "$(grep "^FAIL	$_id	" "$FINDINGS" | cut -f3 | cut -c1-70)"
         done
         [ -n "$UNHANDLED" ] && printf '\nNo automatic repair (left for you):%s\n' "$UNHANDLED"
-        printf '\nThis writes to the repo and pushes refs/dolt/data. Re-run with --yes to do it.\n'
+        # Only promise a push when the plan actually contains one. The steps that
+        # push are the explicit ones plus any db-resident config write, which
+        # dirties the Dolt working set and so draws the commit-and-push post-step
+        # behind it. A plan of nothing but YAML keys pushes nothing, and saying
+        # otherwise on every run would train the warning to be ignored.
+        case " $PLAN " in
+            *" remote.ref "*|*" schema.state "*|*" config.doctor.suppress."*)
+                printf '\nThis writes to the repo and pushes refs/dolt/data. Re-run with --yes to do it.\n' ;;
+            *)
+                printf '\nThis writes to the working tree only — no push, no commit. Re-run with --yes to do it.\n' ;;
+        esac
         exit 0
     fi
 
     printf '\nApplying (%s step(s))...\n\n' "$(printf '%s' "$PLAN" | wc -w | tr -d ' ')"
+    DB_WROTE=0
     for _id in $PLAN; do apply_one "$_id"; done
+
+    # Clearing the Dolt working set is a consequence of what THIS run wrote, so
+    # it cannot be a plan entry: a plan entry is keyed on the PRE-repair audit,
+    # and on an otherwise-clean project verify.dolt-clean was not FAIL, so the
+    # suppress-key writes were left uncommitted and unpushed — the dirty state
+    # that blocks migrations. It also has to run in embedded mode, where there
+    # is no `bd doctor` to have raised the finding in the first place.
+    if [ "$DB_WROTE" = 1 ]; then
+        if bd vc commit -m "config-audit: bring config into the audited state" >/dev/null 2>&1; then
+            did "committed the Dolt working set (db-resident config writes)"
+            bd dolt push >/dev/null 2>&1 && did "pushed the config commit"
+        else
+            skipped "Dolt working set: \`bd vc commit\` found nothing to commit, or failed"
+        fi
+    fi
     cat "$APPLIED"
     [ -n "$UNHANDLED" ] && printf '\nNo automatic repair (left for you):%s\n' "$UNHANDLED"
     printf '\nNothing was committed to git — review and commit the working tree yourself.\n'

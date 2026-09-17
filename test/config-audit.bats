@@ -469,3 +469,76 @@ apply() { run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network --apply $*"
     [ "$status" -eq 3 ]
     [[ "$output" == *"reporting mode"* ]]
 }
+
+# =============================================================================
+# regressions found by review
+# =============================================================================
+
+@test "config-audit: to_https handles every remote shape without corrupting it" {
+    # A code review caught the port case; the first fix for it then ate a path
+    # segment from the scp-style case. Both directions are covered here because
+    # the two shapes are only distinguishable by what follows the ':'.
+    # shellcheck disable=SC1090
+    . <(sed -n '/^to_https() {/,/^}/p' "$CONFIG_AUDIT")
+
+    [ "$(to_https 'git@github.com:me/repo.git')"        = 'https://github.com/me/repo.git' ]
+    [ "$(to_https 'ssh://git@host:2222/me/repo.git')"   = 'https://host/me/repo.git' ]
+    [ "$(to_https 'ssh://git@github.com/me/repo.git')"  = 'https://github.com/me/repo.git' ]
+    [ "$(to_https 'https://github.com/me/repo.git')"    = 'https://github.com/me/repo.git' ]
+    # the git+ prefix is carried through, never invented and never dropped
+    [ "$(to_https 'git+ssh://git@github.com/me/repo.git')"   = 'git+https://github.com/me/repo.git' ]
+    [ "$(to_https 'git+https://github.com/me/repo.git')"     = 'git+https://github.com/me/repo.git' ]
+}
+
+@test "config-audit: the SSH->HTTPS swap never leaves the project remote-less" {
+    make_project
+    # bd 1.3.0 REFUSES a Dolt remote whose URL matches the git origin unless
+    # --allow-git-origin is passed — and a Dolt remote that IS the git origin is
+    # exactly the target state here. Without the flag, remove-then-add left the
+    # project with no remote at all: the only off-machine copy of the beads data,
+    # severed by the script that exists to protect it.
+    bd -C "$PROJECT" dolt remote remove origin >/dev/null 2>&1 || true
+    bd -C "$PROJECT" dolt remote add origin 'git+ssh://git@example.com/me/repo.git' >/dev/null 2>&1
+
+    apply --yes
+    run bash -c "cd '$PROJECT' && bd dolt remote list"
+    [[ "$output" != *"No remotes"* ]]
+    [[ "$output" != *"ssh"* ]]
+    [[ "$output" == *"https://example.com/me/repo.git"* ]]
+}
+
+@test "config-audit: gitignores issues.jsonl even with no off-machine copy" {
+    make_project
+    # "absent but not gitignored" is the commonest form of this finding: there is
+    # nothing to delete, only a pattern to add. Gating that on refs/dolt/data —
+    # which guards the DELETION — made it permanently unfixable.
+    rm -f "$PROJECT/.beads/issues.jsonl"
+    run bash -c "cd '$PROJECT' && git -C '$PROJECT' ls-remote origin refs/dolt/data"
+    [ -z "$output" ]                                   # no off-machine copy
+
+    apply --yes
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network"
+    [ "$(status_of 'files.issues-jsonl')" = "OK" ]
+}
+
+@test "config-audit: never appends a second copy of the memory note" {
+    make_project
+    printf '# Project\n\n## Memory: beads vs. Claude Code auto-memory\nfirst\n' > "$PROJECT/CLAUDE.md"
+    printf '\n## Memory: beads vs. Claude Code auto-memory\nsecond\n' >> "$PROJECT/CLAUDE.md"
+    git -C "$PROJECT" add CLAUDE.md
+
+    # The check fires for "present N times" as well as for "absent"; appending
+    # unconditionally turned two copies into three, and three into four.
+    apply --yes
+    [ "$(grep -cF '## Memory: beads vs. Claude Code auto-memory' "$PROJECT/CLAUDE.md")" -eq 2 ]
+}
+
+@test "config-audit: commits the Dolt working set its own config writes dirty" {
+    make_project --ready
+    # This cannot be a plan entry: a plan entry is keyed on the PRE-repair audit,
+    # so on an otherwise-clean project the suppress-key writes were left
+    # uncommitted — the dirty state that blocks migrations.
+    apply --yes
+    [[ "$output" == *"set doctor.suppress.cursor-integration=true"* ]]
+    [[ "$output" == *"committed the Dolt working set"* ]]
+}
