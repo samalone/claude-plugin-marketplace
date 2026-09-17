@@ -495,7 +495,9 @@ Set each, then confirm with `bd config get`:
   `TypeSection` recipes on `AGENTS.md` in `internal/recipes/recipes.go`, and
   their rendered bodies are byte-identical (verified with `diff` on 1.3.0), so
   the recipe name is only a label for which tool you are nominally
-  configuring — pick either and stay consistent. `--check` reports the state
+  configuring. **Use `factory`**, so all 18 projects stay on one recipe; the
+  choice leaves no trace in the file anyway (the marker records the *profile*,
+  not the recipe). `--check` reports the state
   ("installed but stale" means it found the block and will replace it, even a
   bare pre-versioned marker, because `ReplaceSectionWithOpts` matches the
   BEGIN marker by *prefix*). `--print` previews the body, read-only, without
@@ -523,6 +525,18 @@ Set each, then confirm with `bd config get`:
   section: once at line 26 (outside the block, permanent) and again at line 138
   (inside, replaceable). So refreshing the block fixes half the problem and
   silently leaves the half that contradicts my merge rule.
+
+  **What the refresh does not remove, and must not be "fixed".** The
+  refreshed block still contains a `git pull --rebase` line — but a qualified
+  one: it sits under "Handle git/sync by active profile" as
+  "Team-maintainer opt-in only, unless current instructions forbid it",
+  beside "Explicit user or orchestrator instructions override this Beads
+  block." That is bd's own retreat from the old mandate, it is inside the
+  managed block, and my global plain-merge rule overrides it. Leave it. Do
+  not go looking for a rendered template with no rebase in it: measured on
+  1.3.0, `bd setup codex --print` emits a 58-line minimal body with none,
+  while `factory` installs 131 lines at `profile:full` that includes the
+  qualified line. Those are different templates, not a before/after.
 
   Therefore: **refresh the block as ordinary bd-managed drift** — it is the
   same category as the gitignores and the hooks, and bd's marker discipline
