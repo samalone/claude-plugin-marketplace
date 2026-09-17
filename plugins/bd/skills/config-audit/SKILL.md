@@ -11,7 +11,8 @@ description: >-
     auto-export, ensures a refs/dolt/data remote over HTTPS rather than SSH,
     turns dolt.auto-push off on every project, fixes the gitignores including
     the dolt-server-config.yaml pattern bd omits, disables the branch-polluting
-    backup git-push, and confirms everything works. Don't wait for me to spell
+    backup git-push, suppresses the bd 1.3.0 doctor warnings that describe my
+    deliberate choices rather than drift, and confirms everything works. Don't wait for me to spell
     out each step — invoke this whenever the task is "get this project's Beads
     config into my preferred state."
 ---
@@ -55,7 +56,10 @@ For a single-user, single-machine project:
   so writes land in Dolt history rather than piling up uncommitted in the
   working set. Do **not** force it off in either mode — an uncommitted working
   set is the state that can block migrations and brick `bd`.
-- Schema migrated to match the installed `bd`, and health checks clean.
+- Schema migrated to match the installed `bd`, and health checks clean —
+  with `doctor.suppress.dolt-remote-vs-git-origin` and
+  `doctor.suppress.cursor-integration` set, since both of those warnings
+  describe a deliberate choice rather than drift (step 4).
 - The project's `CLAUDE.md` carries my **memory division-of-labor note**, placed
   *outside* bd's managed block, correcting `bd prime`'s blanket "do NOT use
   MEMORY.md files" rule (step 4).
@@ -205,6 +209,28 @@ For a single-user, single-machine project:
   explicit host/port in config, or shared-server mode): a shared server must
   give this project a unique prefix/database name, and its lifecycle is not this
   project's to start or stop.
+- **What `--fix` can actually touch — and why `--dry-run` overstates it.**
+  `bd doctor --fix --dry-run` echoes the `Fix:` advice string of *every*
+  warning and closes with "Would attempt to fix N issue(s)", which reads as a
+  plan. It is not one. `DoctorCheck` (`cmd/bd/doctor/types.go`) has **no
+  `Fixable` field**; `applyFixList` (`cmd/bd/doctor_fix.go`) dispatches on the
+  check **name**, and a name with no `case` falls to a default that prints
+  "No automatic fix available for X" and continues. Verified on 1.3.0 — these
+  four are *not* cases, so `--fix --yes` cannot act on them:
+  `Dolt Remote vs Git Origin`, `Cursor Integration`, `Agent Doc Divergence`,
+  `Git Working Tree`. That matters because the first one's advice is *"remove
+  the conflicting remote(s)"*, which would sever the project's only off-machine
+  copy of the beads data. It is safe to run `--fix --yes`; it is not safe to
+  read the dry-run as a list of intended changes. If a future version adds a
+  `case` for one of these, re-check before trusting this note.
+- **Hook updates produce no commit.** `bd hooks install` writes to
+  `.git/hooks/`, which is outside the work tree, so refreshing outdated hooks
+  (a near-universal warning after a `bd` upgrade) changes nothing git tracks —
+  don't budget a diff for it. Two details: `--force` is now a documented no-op
+  ("kept for compatibility (section markers always preserve non-bd content)"),
+  so plain `bd hooks install` suffices; and the install leaves
+  `pre-commit.backup` / `post-merge.backup` behind in `.git/hooks/`, which are
+  harmless and unversioned.
 - **Embedded mode:** `bd doctor` may report that it isn't supported in embedded
   mode. If so, verify health directly instead. First get the actual data
   directory from `bd dolt show` / `bd dolt status` (the reported `Data:` path) —
@@ -383,6 +409,27 @@ Set each, then confirm with `bd config get`:
     - Afterwards confirm nothing newly-generated is tracked:
       `git status --short -- .beads/` should show no `??` entries for
       `dolt-server-config.yaml`, `*.gate.lock`, or the data directory.
+- **Silence the two 1.3.0 warnings that are policy, not drift.** Both are
+  advisory and both recur on every project, so suppress them rather than
+  re-triaging them 18 times. Slugs are the check name lowercased with spaces
+  hyphenated (`CheckNameToSlug` in `cmd/bd/doctor/suppress.go`):
+
+      bd config set doctor.suppress.dolt-remote-vs-git-origin true
+      bd config set doctor.suppress.cursor-integration true
+
+    - **`Dolt Remote vs Git Origin`** fires because my Dolt remote *is* the git
+      origin, which is the target state above, and bd 1.3.0 started warning
+      about it. **Never act on its advice.** Both remedies it offers — removing
+      the remote, or `dolt.local-only=true` — destroy the only off-machine copy
+      of the beads data, which is far worse than what they prevent. The warning
+      is not baseless, but it is cosmetic: the issue data lives on
+      `refs/dolt/data`, fully isolated from `refs/heads/*`, so there is no ref
+      collision and no corruption path. The real cost is that Dolt plants two
+      branches in git's branch namespace — `__dolt_remote_info__` and
+      `beads-sync` — where they show up in `git branch -r`, GitHub's branch
+      list, and anything that enumerates branches. Worth knowing; not worth
+      severing sync over.
+    - **`Cursor Integration`** wants `bd setup cursor`. I don't use Cursor.
 - **Disable backup git-push:** `bd config set backup.git-push false`, then
   **verify with `bd config get backup.git-push`**. This one auto-re-enables when
   a git remote exists (which step 4 just ensured), and it's the setting that
@@ -396,6 +443,33 @@ Set each, then confirm with `bd config get`:
   read only" errors under heavy concurrent writes — but 1.1.0 no longer splits
   this default by mode, and that error hasn't shown up at my scale, whereas the
   dirty-working-set brick has. Leave it on.)
+
+- **`Agent Doc Divergence`: opt out, and check whether `AGENTS.md` is stale.**
+  bd 1.3.0 warns when `AGENTS.md` and `CLAUDE.md` differ outside the
+  `BEGIN/END BEADS INTEGRATION` markers, and offers four remedies. On my
+  projects the first three are **destructive**: `CLAUDE.md` is the real,
+  hand-written project instruction file and may carry no bd-managed block at
+  all, while `AGENTS.md` is bd's generated agent primer. Symlinking them, or
+  regenerating `CLAUDE.md` with `AGENTS.md` as the "source of truth", throws
+  away the project instructions. Take option (d) — the divergence is
+  intentional — by appending to `AGENTS.md`, **after** the END marker:
+
+      <!-- bd-doctor-divergence: ok -->
+
+  Then check the block's own vintage, because the divergence often means
+  `AGENTS.md` has been frozen since an older `bd`. The tell is the BEGIN
+  marker: current `bd` writes
+  `<!-- BEGIN BEADS INTEGRATION v:N profile:… hash:… -->`
+  (`internal/templates/agents/render.go`), so a **bare**
+  `<!-- BEGIN BEADS INTEGRATION -->` is the pre-versioned format. A stale block
+  can carry instructions bd itself has since retracted — notably a "MANDATORY
+  WORKFLOW" mandating `git pull --rebase`, which contradicts my plain-merge
+  rule. Compare the live template against the file with
+  `bd setup codex --print` (read-only, prints to stdout; do **not** use
+  `bd setup claude`, which would add a managed block to a `CLAUDE.md` that has
+  none). **Report the drift and propose regenerating; don't regenerate
+  unasked** — it replaces user-visible repo content, so it's my call per
+  project.
 
 - **Add the memory division-of-labor note to the project's `CLAUDE.md`.**
   `bd prime` is injected at every SessionStart and PreCompact, and its Core
@@ -432,7 +506,11 @@ Set each, then confirm with `bd config get`:
 - `bd list` returns issues, and `bd vc status` shows the expected branch with a
   clean working set — meaning it prints branch and commit and *no*
   uncommitted-changes output (use `bd vc status`, not `bd vc log`/`bd history`
-  — see the command-quirks note).
+  — see the command-quirks note). **`bd list` shows only OPEN issues**, so on a
+  mature project it can legitimately print one line against a database of
+  hundreds. That is not truncation and not a broken read path — don't go
+  looking for a fault. Use `bd stats` (`Total Issues:`) when you want the total,
+  which is also the figure to compare against `bd doctor --server`'s count.
 - `bd dolt remote list` shows the remote, its URL is HTTPS (no `ssh://`, no
   `git@`), and a `bd dolt push` succeeds.
 - The git working tree is clean afterward — no stray `.beads/` modifications
@@ -460,7 +538,7 @@ Summarize concisely: version and mode found (state the mode neutrally — server
 and embedded are both acceptable, so the mode itself is never an open
 question; include the reminder that auto-push is off on every project, so
 off-machine sync of issue data happens only on an explicit `bd sync`),
-schema state (and whether you migrated), each config value before/after, and
-anything that needs my decision — a remote-backed database mid-migration, or a
+schema state (and whether you migrated), each config value before/after, the
+doctor warning count before and after, and anything that needs my decision — a remote-backed database mid-migration, or a
 suspected pre-Dolt project you declined to touch. Do not narrate every command;
 give me the deltas and the open questions.
