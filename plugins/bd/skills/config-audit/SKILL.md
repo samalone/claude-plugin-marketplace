@@ -522,10 +522,47 @@ Set each, then confirm with `bd config get`:
       existing one, plus `.agents/skills/beads/SKILL.md` and `.codex/` files.
     - **`bd setup claude`** wants to add a beads section to `CLAUDE.md`
       (`--check`: "CLAUDE.md exists but no beads section found"), which is
-      unwanted on a project whose `CLAUDE.md` is hand-written. Reassuringly it
-      no longer fights the plugin — `--check` reports "Hooks provided by beads
-      plugin (plugin-managed)", so it will not re-add a `bd prime` hook to
-      `settings.json` and re-create the double-prime.
+      unwanted on a project whose `CLAUDE.md` is hand-written. It will not
+      re-add a `bd prime` hook and re-create the double-prime **on a machine
+      where the public plugin is enabled** — but read the next bullet, because
+      that condition is per-machine and the reason is narrower than it looks.
+
+- **`bd prime` comes from the PUBLIC plugin, not from mine, and enablement does
+  not travel between machines.** Worth stating plainly, because all three
+  places it could come from look interchangeable and are not:
+    - `bd@samalone-plugins` (this plugin) registers exactly one SessionStart
+      hook, `inject-beads-workflow.sh`, which emits my PR-workflow guidance.
+      It never invokes `bd prime` — and it should not, or it would double-prime
+      wherever the public plugin is also on.
+    - `beads@beads-marketplace` (the public plugin) declares `bd prime` at
+      SessionStart **and** PreCompact, inline in its `plugin.json`. This is the
+      intended source.
+    - `~/.claude/settings.json` used to carry a manual entry. It was removed on
+      2026-09-17 because it duplicated the public plugin.
+
+  The catch: `enabledPlugins` lives in `settings.json`, which the `~/.claude`
+  repo's allowlist gitignores, so it is **untracked and per-machine**. Enabling
+  the public plugin here does nothing for another machine. On a machine that
+  has only this plugin enabled, *nothing* supplies `bd prime`.
+
+  `bd setup claude --check` does diagnose that correctly, so it can be trusted
+  as the probe. From `cmd/bd/setup/claude.go`: it prints "Hooks provided by
+  beads plugin (plugin-managed)" only when `hasBeadsPlugin` finds an
+  `enabledPlugins` key whose **name segment is exactly `beads`** (`strings.Cut`
+  on `@`, case-insensitive, value `true`) — an exact match, deliberately, per
+  the GH#4244 comment about a substring test mistaking `design-to-beads` for
+  the hook plugin. `bd@samalone-plugins` cuts to `bd` and does not match. With
+  no `beads@…` entry and no `bd prime` in `settings.json`'s
+  SessionStart/PreCompact (`hasBeadsHooks`), it falls to the default branch and
+  reports "✗ No hooks installed / Run: bd setup claude". So on a fresh machine
+  the fix is to **enable `beads@beads-marketplace` there**, not to add
+  `bd prime` to this plugin or back into `settings.json`.
+
+  One dividend of the 3.0.0 rename: under the old name
+  `beads@samalone-plugins`, that name segment cut to `beads`, so
+  `hasBeadsPlugin` would have returned true and bd would have believed the
+  public plugin was supplying hooks when this plugin only supplied guidance —
+  a silent false "plugin-managed" on every machine. The rename retired it.
 
   **Regeneration only reaches the marked block — this is the trap.**
   `ReplaceSectionWithOpts` rebuilds `content[:beginIdx] + <fresh section> +
