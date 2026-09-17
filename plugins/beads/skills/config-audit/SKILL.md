@@ -9,7 +9,8 @@ description: >-
     config preferences have changed. It verifies the bd version and schema, runs
     the right health checks for the storage mode, turns off issues.jsonl
     auto-export, ensures a refs/dolt/data remote over HTTPS rather than SSH,
-    turns dolt.auto-push off on every project, disables the branch-polluting
+    turns dolt.auto-push off on every project, fixes the gitignores including
+    the dolt-server-config.yaml pattern bd omits, disables the branch-polluting
     backup git-push, and confirms everything works. Don't wait for me to spell
     out each step — invoke this whenever the task is "get this project's Beads
     config into my preferred state."
@@ -346,6 +347,42 @@ Set each, then confirm with `bd config get`:
       the sketch, with stale-lock TTL as the unsolved part.
     - Report that off-machine sync relies on explicit `bd sync`, for every
       project rather than only server-mode ones.
+- **Gitignore: let bd own its patterns, and add the one it misses.**
+    - **Server mode → `bd doctor --fix --yes`.** bd maintains
+      `.beads/.gitignore` and the project `.gitignore` from its own
+      `requiredPatterns` list, and it is **append-only** on an existing file —
+      `cmd/bd/doctor/gitignore.go` says it "must never rewrite an existing file
+      wholesale", with a regression guard (bd-kaaz3) from an incident where a
+      full-template rewrite destroyed local rules. So delegating is safe and my
+      own additions survive. Don't duplicate bd's list here; it grows between
+      versions (1.3.0 added `*.gate.lock*`) and a copy would drift.
+      Note `--fix` alone declines non-interactively and tells you to pass
+      `--yes`. It also rewrites the PROJECT `.gitignore`, a tracked file — fine
+      inside a deliberate audit, but say so in the report.
+    - **Then append `dolt-server-config.yaml` to `.beads/.gitignore` myself.**
+      bd generates this file in server mode (machine-local: `log_level`,
+      `listener.host`) and does NOT ignore it. Its `requiredPatterns` lists five
+      siblings — `dolt-server.pid`, `.log`, `.lock`, `.port`, `.activity` — and
+      omits this one, and no existing glob catches it (the name is
+      `dolt-server-config.yaml`, hyphen not dot, so `dolt-server.*` misses it;
+      `*.lock` and `daemon.*` miss it too). Verified on bd 1.3.0: present in
+      every server-mode project, ignored in none. Without the pattern a
+      `git add .` commits machine-specific server config into a shared repo.
+      Guard the append: `bd init` writes these files with no trailing newline,
+      so check the last byte first (same trap as `set_auto_push` and the test
+      harness's `append_config_line`).
+    - **Embedded mode → do it all by hand; there is NO bd mechanism.** Verified
+      on 1.3.0: `bd doctor` is still unsupported in embedded mode, and — the
+      trap — it prints "not yet supported in embedded mode" and **exits 0**, so
+      a script checking `$?` concludes the fix ran when nothing happened. And
+      `bd init` is NOT safe to re-run despite doctor's own advice saying so: it
+      fails with "Found existing Dolt database" and tops up nothing (measured:
+      81 gitignore lines before and after). So on an embedded project, compare
+      `.beads/.gitignore` against bd's pattern list by hand and append what is
+      missing. Report that bd's suggested remedies do not apply.
+    - Afterwards confirm nothing newly-generated is tracked:
+      `git status --short -- .beads/` should show no `??` entries for
+      `dolt-server-config.yaml`, `*.gate.lock`, or the data directory.
 - **Disable backup git-push:** `bd config set backup.git-push false`, then
   **verify with `bd config get backup.git-push`**. This one auto-re-enables when
   a git remote exists (which step 4 just ensured), and it's the setting that
@@ -403,8 +440,9 @@ Set each, then confirm with `bd config get`:
 - The Dolt data directory (the `Data:` path from step 1),
   `.beads-credential-key`, and any legacy `*.db` are gitignored and **not**
   tracked — the database and the machine credential must never be committed.
-  `bd init` normally adds these, but verify explicitly, since `bd doctor --fix`
-  (which manages the gitignore) does not run in embedded mode.
+  `bd init` normally adds these at creation, but verify explicitly: in embedded
+  mode `bd doctor --fix` does not run (and exits 0 anyway), and re-running
+  `bd init` to top them up does not work either — see the gitignore step.
 - The project's `CLAUDE.md` contains the memory division-of-labor note exactly
   once, after the `<!-- END BEADS INTEGRATION -->` marker rather than inside it.
 - **`.beads/metadata.json` being tracked in git is fine — don't "fix" it.** bd's
