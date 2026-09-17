@@ -124,6 +124,14 @@ For a single-user, single-machine project:
   dirty. Absent output is therefore the pass, not a broken or truncated
   command; don't go hunting for a cleanliness line that was never going to
   print, and don't conclude the signal was dropped from the command.
+  **But do not treat it as the authority on cleanliness.** Measured on 1.3.0:
+  right after a `bd config set`, `bd vc status` printed branch and commit with
+  no changes line — reading as clean — while `bd doctor` in the same instant
+  reported `config: modified`, and `bd vc commit` went on to create a real
+  commit. So `bd vc status` under-reports at least table-level config changes.
+  When cleanliness actually matters (before a migration, or at final
+  verification), trust `bd doctor`'s `Dolt Status` / `Dolt Locks` checks and
+  treat `bd vc status` as the branch/commit readout only.
   `bd history` does exist but is
   currently broken on migrated databases (known bug, fix unmerged): it fails on
   historical rows whose `description` was NULL, with
@@ -416,6 +424,23 @@ Set each, then confirm with `bd config get`:
 
       bd config set doctor.suppress.dolt-remote-vs-git-origin true
       bd config set doctor.suppress.cursor-integration true
+
+  **These two keys do NOT live in `.beads/config.yaml`.** `bd config`'s help
+  says configuration is "stored per-project in the beads database", and only
+  `export.*`, `import.*` and `lint.*` are annotated as living in the YAML. So
+  the duplicate-key grep at the top of this skill finds *nothing* for them,
+  and that is not a failed write. Verify with `bd config get`, or read the rows
+  directly (`key` is reserved, so it needs backticks):
+
+      bd sql "SELECT * FROM config WHERE \`key\` LIKE '%suppress%'"
+
+  Two consequences. They travel to other machines on `refs/dolt/data`, which is
+  what I want for repo-scoped policy — but only after a `bd dolt push`. And
+  writing them leaves the `config` table dirty in the Dolt working set, which
+  surfaces as two *new* warnings, `Dolt Status` and `Dolt Locks`, both
+  "uncommitted changes". Clear them with `bd vc commit -m "..."` and push;
+  don't leave them to the "auto-commit on next bd command" that bd offers,
+  since a dirty working set is the state that blocks migrations.
 
     - **`Dolt Remote vs Git Origin`** fires because my Dolt remote *is* the git
       origin, which is the target state above, and bd 1.3.0 started warning
