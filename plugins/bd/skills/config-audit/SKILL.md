@@ -89,20 +89,40 @@ For a single-user, single-machine project:
       setting — e.g. an `unset` flipped the effective value from `true` to
       `false` rather than returning it to the default. Re-`set` has the same
       one-layer blind spot.
-  - **Workaround.** After changing any config key, don't trust `get` by itself —
-    grep the raw file and confirm the key appears **exactly once**:
+  - **Workaround: ask `yq`, never `grep`.** After changing any config key, don't
+    trust `get` by itself — but do *not* reach for the grep recipe this skill
+    used to give here:
 
-        grep -nE '(^|[[:space:]])<key-leaf>:' .beads/config.yaml   # e.g. auto-push:
+        grep -nE '(^|[[:space:]])<key-leaf>:' .beads/config.yaml   # BROKEN
 
-    (Check both the flat form `namespace.key:` at column 0 and the nested child
-    `key:` indented under a `namespace:` line.) If it appears more than once,
-    the file is ambiguous: hand-edit (or `sed`) it down to a **single**
-    representation — either one flat dotted line or one nested-block child, your
-    choice — delete the stale duplicate, then re-run `bd config get <key>` to
-    confirm the intended value survived. Do not rely on repeated
-    `bd config set`/`unset` to clean this up; they operate one representation at
-    a time and can leave or reveal the other. A direct file edit is the reliable
-    fix here.
+    Measured on a pristine bd config: for `backup.git-push` that matches **only**
+    line 44, `#   git-push: false    # Disable git push (backup locally only)` —
+    a commented-out line in bd's stock template — and **misses** the live
+    `backup.git-push:` at line 70, because there the leaf is preceded by `.`,
+    which is neither `^` nor whitespace. It has been inspecting comments and
+    landing on the right verdict only because two errors cancelled. On `macdown`,
+    where `backup.git-push` is genuinely absent, it reports one match and reads
+    as fine.
+
+    To YAML the two spellings are different keys — `dolt.auto-push` is a literal
+    dotted scalar key, `dolt:`/`auto-push:` is a map — so presence is an exact
+    question:
+
+        yq 'has("dolt.auto-push")'        .beads/config.yaml   # flat present?
+        yq '.dolt | has("auto-push")'     .beads/config.yaml   # nested present?
+
+    Both `true` means the file is ambiguous. Flat wins when both are present,
+    matching bd's own precedence. Repair by hand-editing down to a **single**
+    representation, then re-run `bd config get <key>` to confirm the intended
+    value survived. Do not rely on repeated `bd config set`/`unset`; they operate
+    one representation at a time and can leave or reveal the other.
+
+    **Never use yq's `//` to supply a default here.** `."export.auto" // "X"`
+    returns `X` for a key that is present and set to `false`, because `//` treats
+    `false` as empty — collapsing exactly the absent-vs-false distinction this
+    skill depends on. Use `has()` for presence and a separate read for the value.
+
+    `scripts/config-audit.sh` does all of this for you; see step 0.
 - **Known 1.1.0 display quirks — don't be fooled into "fixing" a non-problem.**
   `bd dolt show` can print `Remotes: (none)` even when a remote exists, and the
   remote key is `sync.remote` (so `bd config get sync.git-remote` reports "not
@@ -161,6 +181,43 @@ For a single-user, single-machine project:
   report rather than acting.
 
 ## Procedure
+
+### 0. Run the audit script first
+
+`scripts/config-audit.sh` in this plugin (a sibling of this skill's directory,
+`${CLAUDE_PLUGIN_ROOT}/scripts/config-audit.sh`) performs steps 1–3 and 5, and
+every *check* in step 4, deterministically. **It is strictly read-only** — it
+never runs `bd config set`, never touches `.beads/`, never stages or commits, and
+never starts or stops a server — so it is always safe to run first, on any
+project, before deciding anything.
+
+```bash
+"<plugin>/scripts/config-audit.sh"               # report
+"<plugin>/scripts/config-audit.sh" --json        # same findings, machine-readable
+"<plugin>/scripts/config-audit.sh" --no-network  # skip the ls-remote probe (fast sweeps)
+```
+
+It needs `bd`, `git`, `jq`, and **mikefarah/yq v4** (`brew install yq`,
+`winget install MikeFarah.yq`). It refuses to run against kislyuk/yq, the
+unrelated Python tool of the same name that `apt install yq` provides.
+
+Findings are `OK` / `FAIL` (mechanical drift) / `WARN` (repair is a judgement
+call) / `INFO` / `STOP` (do not let a repair pass near this project). Exit codes:
+0 clean, 1 drift, 2 a STOP condition, 3 script error.
+
+**Read its output, then do only the repairs it flagged.** Don't re-derive the
+whole procedure by hand — the steps below are the rationale for each check and
+the instructions for the repairs, which are still yours to apply. In particular,
+the script deliberately does **not** decide any of these; they stay with me:
+
+- a suspected pre-Dolt (0.x) project, or a non-zero-count pending migration
+- deleting the duplicated pre-BEGIN residue in `AGENTS.md` (it reports the line
+  numbers; removing them is a content decision — propose it, don't act)
+- any doctor warning outside the two known-policy suppressions
+- whether `interactions.jsonl` should start travelling, if I go multi-machine
+
+If the script refuses on the bd version gate, stop and tell me rather than
+widening it: every check parses bd's output, and bd is a fast-moving tool.
 
 ### 1. Identify the project
 

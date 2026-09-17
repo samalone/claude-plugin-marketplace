@@ -87,8 +87,11 @@ jobs:
       - name: Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@df4b09108a1de9d6f995fe68f302b3f68bd6d2ef
 
-      - name: Install bd and bats-core
-        run: brew install beads bats-core
+      # yq = mikefarah/yq (the Go build); config-audit.sh refuses to run against
+      # kislyuk/yq, the unrelated Python tool of the same name that Ubuntu's
+      # `apt install yq` provides. Homebrew ships the Go one on both legs.
+      - name: Install bd, bats-core and yq
+        run: brew install beads bats-core yq
 
       # change-mode.sh refuses to run outside the versions its commands and
       # output-parsing were verified against. Fail loudly here rather than
@@ -106,16 +109,18 @@ jobs:
       # script gate beside a stale workflow gate is exactly how CI stayed red
       # for six commits on 2026-09-17. Fail on the drift itself, not on its
       # symptom.
-      - name: Assert the two bd version gates agree
+      - name: Assert the bd version gates all agree
         run: |
-          pat=$(grep -o '1\.1\.\*[^)]*' plugins/bd/scripts/change-mode.sh | head -1)
-          echo "change-mode.sh gate: $pat"
-          if [ -z "$pat" ]; then
-            echo "::error::could not read the version gate out of plugins/bd/scripts/change-mode.sh"; exit 1
-          fi
-          grep -qF "$pat" .github/workflows/ci.yml || {
-            echo "::error::change-mode.sh allows '$pat' but this workflow's gate differs — widen both together"; exit 1
-          }
+          for f in plugins/bd/scripts/change-mode.sh plugins/bd/scripts/config-audit.sh; do
+            pat=$(grep -o '1\.1\.\*[^)]*' "$f" | head -1)
+            echo "$f gate: $pat"
+            if [ -z "$pat" ]; then
+              echo "::error::could not read the version gate out of $f"; exit 1
+            fi
+            grep -qF "$pat" .github/workflows/ci.yml || {
+              echo "::error::$f allows '$pat' but this workflow's gate differs — widen both together"; exit 1
+            }
+          done
 
       # Fixtures live under $HOME (bd rejects /tmp-family locations as unsafe);
       # the runner home is bd-safe.

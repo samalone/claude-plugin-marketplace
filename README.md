@@ -110,9 +110,31 @@ Additions to the **public** beads plugin (`beads@beads-marketplace`), not a repl
 - a Dolt remote on `refs/dolt/data`, with the first push actually done, and its
   URL on HTTPS rather than SSH — SSH keys held by 1Password make background
   auto-push succeed or fail according to whether 1Password is unlocked
-- `dolt.auto-push` on for embedded (single-writer) projects, off for server mode
+- `dolt.auto-push` off on **every** project, set explicitly rather than left to
+  the default — git-protocol Dolt remotes have no chunk-level upload atomicity,
+  and the debounce is an unlocked read-modify-write, so even one machine running
+  parallel agent sessions is a multi-writer setup. Off-machine sync is a
+  deliberate `bd sync`.
 - `backup.git-push` off; `dolt.auto-commit` left at bd's default
 - schema matched to the installed `bd`, and mode-appropriate health checks
+
+The checks are performed by `scripts/config-audit.sh`, which is **strictly
+read-only** — it never runs `bd config set`, touches `.beads/`, stages, commits,
+or starts a server — so it is safe to sweep across every project before deciding
+anything. `--json` emits the findings machine-readably and `--no-network` skips
+the `ls-remote` probe. Exit codes: 0 clean, 1 drift, 2 a condition needing your
+decision (a pre-Dolt layout, a real pending migration), 3 script error. The skill
+keeps the rationale for each check and the repairs, which stay manual for now.
+
+It needs **mikefarah/yq v4** alongside `bd`, `git` and `jq`, and refuses to run
+against kislyuk/yq — the unrelated Python tool of the same name that `apt install
+yq` provides. yq is there because grep cannot do this job: on bd's stock
+`config.yaml`, which is ~95% commented-out documentation, a leaf-name grep for
+`git-push:` matches bd's own commented example and *misses* the live
+`backup.git-push:` whose leaf is preceded by a dot. To YAML the flat dotted key
+and the nested child are genuinely different keys, so `has()` on each answers
+exactly. A round-trip yq edit of a real config produces a one-line diff with
+every comment byte-identical.
 
 **`/bd:change-mode [embedded|server]`.** Switches the project's Dolt database between embedded mode (`.beads/embeddeddolt/`) and project-server mode (`.beads/dolt/`). The modes are not interchangeable — server mode is noticeably faster, embedded mode has no server process to manage — so this is a deliberate choice, and `disable-model-invocation: true` keeps the skill slash-only so the model can never switch modes on its own initiative. `/bd:config-audit` treats either mode as acceptable precisely so it never second-guesses that choice.
 

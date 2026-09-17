@@ -101,7 +101,7 @@ fixtures under `$HOME` (bd refuses `/tmp`-family "unsafe" locations; override th
 base with `BD_TESTS_TMPDIR`) and never touches a live repo. Locally:
 
 ```bash
-brew install bats-core shellcheck jq          # bd 1.1.x-1.3.x must already be installed
+brew install bats-core shellcheck jq yq       # bd 1.1.x-1.3.x must already be installed
 claude plugin validate .
 shellcheck plugins/*/scripts/*.sh && shellcheck -x test/helpers/setup.bash
 bats test/                                    # ~3 min
@@ -112,9 +112,15 @@ Two traps the fixtures hit, worth knowing before editing them:
 - **`bd init` writes `.beads/config.yaml` with no trailing newline.** A naive
   `>>` append lands on the end of the `sync.remote` line and silently corrupts
   it. Use the harness's `append_config_line`.
-- **The audit is a skill, not a script.** `prepare_for_switch` in the harness
-  reimplements only the preconditions `change-mode.sh` checks, because a skill
-  can't be invoked from a test. Keep it in sync with that script's Phase A.
+- **The audit's CHECKS are now a script; its repairs are still a skill.**
+  `config-audit.sh` is read-only and covered by `test/config-audit.bats`.
+  `prepare_for_switch` in the harness still reimplements only the preconditions
+  `change-mode.sh` checks, because the repairs a skill performs can't be invoked
+  from a test. Keep it in sync with that script's Phase A.
+- **`yq` here means mikefarah/yq v4**, the Go binary. `apt install yq` on Debian
+  gives kislyuk/yq, a Python jq wrapper with a different CLI; `config-audit.sh`
+  gates on the version banner so the wrong one fails loudly. CI installs it from
+  Homebrew on both legs.
 
 ## Plugin Repos
 

@@ -17,19 +17,22 @@
 
 # This file is sourced via bats `load`; the vars/functions below are the harness
 # API consumed by the .bats files, which shellcheck can't see across the load.
-# shellcheck disable=SC2034  # CHANGE_MODE is used by the sourcing tests
+# shellcheck disable=SC2034  # CHANGE_MODE/CONFIG_AUDIT are used by the sourcing tests
 
 # Absolute path to the tool under test (BATS_TEST_DIRNAME = the test/ dir).
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 CHANGE_MODE="$REPO_ROOT/plugins/bd/scripts/change-mode.sh"
+CONFIG_AUDIT="$REPO_ROOT/plugins/bd/scripts/config-audit.sh"
 
 # bd-safe base for fixtures (not /tmp or /var/tmp).
 BD_TESTS_BASE="${BD_TESTS_TMPDIR:-$HOME}"
 
-# Skip the whole test cleanly if a required tool is missing.
+# Skip the whole test cleanly if a required tool is missing. Extra tool names
+# may be passed for suites that need more than the common three (config-audit
+# needs yq).
 require_tools() {
     local t
-    for t in bd git jq; do
+    for t in bd git jq "$@"; do
         command -v "$t" >/dev/null 2>&1 || skip "required tool not found: $t"
     done
 }
