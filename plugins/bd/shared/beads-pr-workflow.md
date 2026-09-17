@@ -3,7 +3,7 @@
 This is injected by a `SessionStart` hook whenever a `.beads/` directory is found
 above the project. It describes how I want beads *used* during a session. It does
 **not** cover configuration or sync — those are handled by my per-project setup
-(see the `/beads:config-audit` skill), and are deliberately not your concern here.
+(see the `/bd:config-audit` skill), and are deliberately not your concern here.
 
 **Scope.** This assumes Dolt-era beads (`bd` 1.0+), where issue state lives in a
 Dolt database. If a project is on a pre-Dolt version (0.x), none of the model
@@ -80,6 +80,6 @@ something you need to manage. Keep your focus on the code.
 - **Do not** run `bd backup` or migrations, and do not touch the `.beads/` data
   directories, unless I explicitly ask. If something about the database or config
   looks wrong, tell me — don't try to repair it inline. That's what the
-  `/beads:config-audit` skill is for.
+  `/bd:config-audit` skill is for.
 - **Do not** commit `.beads/issues.jsonl` (auto-export is off, so committing a
   stray export just creates noise).

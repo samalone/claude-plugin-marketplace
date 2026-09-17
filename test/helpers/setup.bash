@@ -21,7 +21,7 @@
 
 # Absolute path to the tool under test (BATS_TEST_DIRNAME = the test/ dir).
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-CHANGE_MODE="$REPO_ROOT/plugins/beads/scripts/change-mode.sh"
+CHANGE_MODE="$REPO_ROOT/plugins/bd/scripts/change-mode.sh"
 
 # bd-safe base for fixtures (not /tmp or /var/tmp).
 BD_TESTS_BASE="${BD_TESTS_TMPDIR:-$HOME}"
@@ -72,7 +72,7 @@ make_project() {
 
 # prepare_for_switch — bring the fixture to the state change-mode's pre-flight
 # requires. This deliberately reimplements only the handful of preconditions the
-# script checks, rather than shelling out to the /beads:config-audit skill: that
+# script checks, rather than shelling out to the /bd:config-audit skill: that
 # audit is a *skill* (instructions for Claude), not a script, so it cannot be
 # invoked from a test. Keep this in sync with cmd_switch's Phase A.
 #

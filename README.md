@@ -89,22 +89,22 @@ at local scope, so nothing is written into the repository. Two things are worth 
 
 See [Giving external agents access to Xcode](https://developer.apple.com/documentation/xcode/giving-external-agents-access-to-xcode). `xcrun mcpbridge` ships with Xcode 26.1 and later; without it the hook says so instead of adding anything.
 
-### beads
+### bd
 
-Everything for beads (`bd`) projects in one plugin: workflow guidance injected at session start, plus three skills.
+Additions to the **public** beads plugin (`beads@beads-marketplace`), not a replacement for it: PR-workflow guidance injected at session start, plus three skills the public plugin does not provide. Install both — the public plugin supplies `bd prime` at SessionStart and PreCompact plus an MCP server; this one adds personal policy and tooling on top.
 
 - **Category:** Workflow
-- **Source:** embedded — [`plugins/beads`](plugins/beads)
-- **Install:** `/plugin install beads@samalone-plugins`
+- **Source:** embedded — [`plugins/bd`](plugins/bd)
+- **Install:** `/plugin install bd@samalone-plugins` (alongside `/plugin install beads@beads-marketplace`)
 
 **Workflow guidance (self-gating).** A `SessionStart` hook walks up from the session directory looking for `.beads/` and emits nothing when there is none, so the plugin is safe to install once at the user level. The injected guidance covers claiming, closing vs. merging, gates, discovered work, and multi-worktree rules.
 
-**`/beads:plan <bead-id>`.** Runs a full plan-mode session against one bead and writes the approved plan into that bead's `design` field, for a different session in a different worktree to execute. It never implements. Two frontmatter settings shape how it runs:
+**`/bd:plan <bead-id>`.** Runs a full plan-mode session against one bead and writes the approved plan into that bead's `design` field, for a different session in a different worktree to execute. It never implements. Two frontmatter settings shape how it runs:
 
 - `model: fable` — planning runs on Fable even when the surrounding session is on Opus, with no manual `/model` switch. The override covers the whole skill run, tool-calling turns included. If Fable is not in the account's available models, Claude Code warns and keeps the session model rather than failing.
 - `disable-model-invocation: true` — the skill is slash-only. The model cannot pull it in on its own, which matters for a skill that redirects the session into plan mode on another model.
 
-**`/beads:config-audit`.** A deliberate maintenance operation, not a session-time behaviour — invoke it per project, after a `bd` upgrade, or when you suspect config drift. It checks:
+**`/bd:config-audit`.** A deliberate maintenance operation, not a session-time behaviour — invoke it per project, after a `bd` upgrade, or when you suspect config drift. It checks:
 
 - `issues.jsonl` export off, file untracked and gitignored; `interactions.jsonl` kept but untracked
 - a Dolt remote on `refs/dolt/data`, with the first push actually done, and its
@@ -114,7 +114,7 @@ Everything for beads (`bd`) projects in one plugin: workflow guidance injected a
 - `backup.git-push` off; `dolt.auto-commit` left at bd's default
 - schema matched to the installed `bd`, and mode-appropriate health checks
 
-**`/beads:change-mode [embedded|server]`.** Switches the project's Dolt database between embedded mode (`.beads/embeddeddolt/`) and project-server mode (`.beads/dolt/`). The modes are not interchangeable — server mode is noticeably faster, embedded mode has no server process to manage — so this is a deliberate choice, and `disable-model-invocation: true` keeps the skill slash-only so the model can never switch modes on its own initiative. `/beads:config-audit` treats either mode as acceptable precisely so it never second-guesses that choice.
+**`/bd:change-mode [embedded|server]`.** Switches the project's Dolt database between embedded mode (`.beads/embeddeddolt/`) and project-server mode (`.beads/dolt/`). The modes are not interchangeable — server mode is noticeably faster, embedded mode has no server process to manage — so this is a deliberate choice, and `disable-model-invocation: true` keeps the skill slash-only so the model can never switch modes on its own initiative. `/bd:config-audit` treats either mode as acceptable precisely so it never second-guesses that choice.
 
 Because the two modes keep their database in different directories, a switch is a physical transfer rather than a config flag. `scripts/change-mode.sh` pushes `refs/dolt/data` first so an off-machine copy exists, backs the database up to a temp directory, copies it across (falling back to `bd bootstrap` from the remote), flips `dolt.auto-push` to match the mode — on for single-writer embedded, off for server, where concurrent auto-push can corrupt remote history — and verifies a per-issue `{id, status, updated_at}` fingerprint against the pre-switch value. Any failure rolls back the mode, config, and data, and restarts a server it had stopped. It never commits: `metadata.json` and `config.yaml` are left modified for you to review.
 
@@ -122,7 +122,7 @@ Git hooks are out of scope by design. `bd init` and `bd hooks install` own the b
 
 With no argument the skill reports the current mode and changes nothing.
 
-Skills cannot self-gate the way the hook does: a plugin's `skills/` directory is scanned when the plugin loads, so the skill descriptions enter every session's context, beads project or not. That cost is small — the bodies stay lazy, and `/beads:plan` and `/beads:change-mode` are hidden from the model entirely — and it buys zero per-project setup.
+Skills cannot self-gate the way the hook does: a plugin's `skills/` directory is scanned when the plugin loads, so the skill descriptions enter every session's context, beads project or not. That cost is small — the bodies stay lazy, and `/bd:plan` and `/bd:change-mode` are hidden from the model entirely — and it buys zero per-project setup.
 
 ## License
 

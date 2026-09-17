@@ -8,7 +8,7 @@
 #   change-mode.sh embedded       switch to embedded mode
 #   change-mode.sh server         switch to project-server mode
 #
-# Invoked by the /beads:change-mode skill; safe to run directly too.
+# Invoked by the /bd:change-mode skill; safe to run directly too.
 #
 # The mode is selected by the `dolt_mode` field in .beads/metadata.json.
 # The two modes keep their Dolt database in DIFFERENT directories
@@ -16,7 +16,7 @@
 # switch physically transfers the database rather than just flipping a flag.
 #
 # This script expects the single-user Dolt preferences enforced by the
-# /beads:config-audit skill (a `refs/dolt/data` remote on git origin, auto-export
+# /bd:config-audit skill (a `refs/dolt/data` remote on git origin, auto-export
 # off, etc.) and VERIFIES that configuration before changing anything. It:
 #   * ensures the remote `refs/dolt/data` ref is up to date (commit + push) first,
 #   * makes a temporary local backup of the Dolt database before any change,
@@ -200,7 +200,7 @@ set_dolt_mode() {   # $1 = embedded|server ; preserves bd's no-trailing-newline 
 }
 
 # Normalize dolt.auto-push to a single flat "dolt.auto-push: <val>" line — the
-# same representation the /beads:config-audit skill specifies. Portable (no `sed -i`), and
+# same representation the /bd:config-audit skill specifies. Portable (no `sed -i`), and
 # verified via `bd config get` since this is a durability-critical setting.
 set_auto_push() {   # $1 = true|false
     local tmp="$CFG.tmp$$"
@@ -283,12 +283,12 @@ cmd_switch() {
     case "$CUR" in embedded|server) ;; *) die "unexpected current dolt_mode: '$CUR'";; esac
 
     git -C "$REPO_ROOT" remote get-url origin >/dev/null 2>&1 || die "no git 'origin' remote"
-    [ -n "$(sync_remote)" ] || die "sync.remote is not configured in config.yaml (run /beads:config-audit first)"
+    [ -n "$(sync_remote)" ] || die "sync.remote is not configured in config.yaml (run /bd:config-audit first)"
     # Capture then test for a non-empty ref (never `| grep -q .`): under pipefail
     # grep -q closes the pipe on the first line, git dies with SIGPIPE, and the
     # pipeline goes non-zero — misreading a present ref as missing.
     _ref=$(git -C "$REPO_ROOT" ls-remote origin refs/dolt/data 2>/dev/null) || _ref=""
-    [ -n "$_ref" ] || die "remote has no refs/dolt/data ref — run 'bd dolt push' or the /beads:config-audit skill first"
+    [ -n "$_ref" ] || die "remote has no refs/dolt/data ref — run 'bd dolt push' or the /bd:config-audit skill first"
 
     # Capture the dry-run output once, then match with a here-string. Piping bd
     # straight into `grep -q` inverts under pipefail (grep closes early -> bd

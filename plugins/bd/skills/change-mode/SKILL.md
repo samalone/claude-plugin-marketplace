@@ -1,6 +1,6 @@
 ---
 name: change-mode
-description: Switch this project's beads (bd) Dolt database between embedded and project-server mode, transferring the database and verifying the two are equivalent. Invoked by typing `/beads:change-mode [embedded|server]`; with no argument it reports the current mode and changes nothing.
+description: Switch this project's beads (bd) Dolt database between embedded and project-server mode, transferring the database and verifying the two are equivalent. Invoked by typing `/bd:change-mode [embedded|server]`; with no argument it reports the current mode and changes nothing.
 disable-model-invocation: true
 argument-hint: "[embedded|server]"
 ---
@@ -17,7 +17,7 @@ is a physical transfer, not a config flag:
 
 **This is my deliberate choice, not drift.** The two modes differ in real ways —
 server mode is noticeably faster, embedded mode has no server process to manage.
-The `/beads:config-audit` skill treats either mode as acceptable *precisely so it
+The `/bd:config-audit` skill treats either mode as acceptable *precisely so it
 never second-guesses this decision*; that silence is not a statement that the
 modes are interchangeable. Never run this skill on your own initiative, and never
 suggest a switch because a project "should" be in the other mode.
@@ -86,5 +86,5 @@ pre-switch database — leave it in place, and don't delete it as cleanup.
   skill does not install, check, or modify them, and neither does the script.
   If Dolt data isn't syncing on push, that's a question for `bd`, not for this.
 - **Fixing configuration.** If pre-flight fails on `sync.remote`, a missing
-  `refs/dolt/data`, or a pending migration, that's `/beads:config-audit`'s job.
+  `refs/dolt/data`, or a pending migration, that's `/bd:config-audit`'s job.
   Report the error and suggest that skill rather than patching config by hand.

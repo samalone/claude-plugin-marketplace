@@ -54,9 +54,9 @@
       ]
     },
     {
-      "name": "beads",
-      "description": "Everything for beads (bd) projects: self-gating workflow guidance injected at SessionStart, the /beads:plan bead-planning skill, the /beads:config-audit Dolt configuration audit, and the /beads:change-mode embedded/server switcher. The guidance emits nothing unless a .beads/ directory is found.",
-      "source": "./plugins/beads",
+      "name": "bd",
+      "description": "Everything for beads (bd) projects that the public beads plugin does not provide: self-gating PR-workflow guidance injected at SessionStart, the /bd:plan bead-planning skill, the /bd:config-audit Dolt configuration audit, and the /bd:change-mode embedded/server switcher. Designed to sit on top of beads@beads-marketplace rather than replace it. The guidance emits nothing unless a .beads/ directory is found.",
+      "source": "./plugins/bd",
       "category": "workflow",
       "tags": [
         "profile",

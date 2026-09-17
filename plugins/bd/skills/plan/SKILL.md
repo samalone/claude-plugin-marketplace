@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Plan the implementation of one bead and write the approved plan into that bead's design field for a different session to execute. Invoked by typing `/beads:plan <bead-id>`; it plans only and never implements.
+description: Plan the implementation of one bead and write the approved plan into that bead's design field for a different session to execute. Invoked by typing `/bd:plan <bead-id>`; it plans only and never implements.
 model: fable
 disable-model-invocation: true
 argument-hint: <bead-id>
@@ -81,7 +81,7 @@ both the same way. Prepend this header to the plan file, then write it to the
 bead:
 
 ```
-> **Implementation plan** — /beads:plan, <YYYY-MM-DD> · base commit `<short-sha>`
+> **Implementation plan** — /bd:plan, <YYYY-MM-DD> · base commit `<short-sha>`
 > Verify the cited paths and symbols still exist at HEAD before following this.
 > If HEAD has moved substantially past that commit, re-verify the affected steps
 > or re-plan rather than following it blindly.
