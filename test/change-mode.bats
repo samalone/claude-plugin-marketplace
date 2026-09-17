@@ -14,24 +14,24 @@ teardown() {
 
 # --- round trip -------------------------------------------------------------
 
-@test "change-mode: embedded->server->embedded flips auto-push, preserves issues" {
+@test "change-mode: embedded->server->embedded keeps auto-push false, preserves issues" {
     make_project --ready
     ( cd "$PROJECT" && bd create --title="round trip" --type=task -p 2 >/dev/null 2>&1 )
     local before; before="$(issue_sig)"
     [ "$(meta dolt_mode)" = embedded ]
-    [ "$(autopush_line)" = "dolt.auto-push: true" ]      # embedded: single-writer durability on
+    [ "$(autopush_line)" = "dolt.auto-push: false" ]     # audited state: off on every project
 
     run bash -c "cd '$PROJECT' && env -u BEADS_DOLT_AUTO_START '$CHANGE_MODE' server"
     [ "$status" -eq 0 ]
     [ "$(meta dolt_mode)" = server ]
-    [ "$(autopush_line)" = "dolt.auto-push: false" ]     # server: avoid concurrent auto-push
+    [ "$(autopush_line)" = "dolt.auto-push: false" ]     # unchanged by the switch
     [ -d "$PROJECT/.beads/dolt" ]
     [ ! -d "$PROJECT/.beads/embeddeddolt" ]              # old-mode data dir removed
 
     run bash -c "cd '$PROJECT' && env -u BEADS_DOLT_AUTO_START '$CHANGE_MODE' embedded"
     [ "$status" -eq 0 ]
     [ "$(meta dolt_mode)" = embedded ]
-    [ "$(autopush_line)" = "dolt.auto-push: true" ]
+    [ "$(autopush_line)" = "dolt.auto-push: false" ]     # NOT flipped back to true
     [ -d "$PROJECT/.beads/embeddeddolt" ]
     [ ! -d "$PROJECT/.beads/dolt" ]
 
@@ -79,7 +79,7 @@ teardown() {
 
     # everything restored
     [ "$(meta dolt_mode)" = embedded ]
-    [ "$(autopush_line)" = "dolt.auto-push: true" ]
+    [ "$(autopush_line)" = "dolt.auto-push: false" ]
     [ -d "$PROJECT/.beads/embeddeddolt" ]
     [ "$(issue_sig)" = "$before" ]
 }

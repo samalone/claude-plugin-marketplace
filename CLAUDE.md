@@ -101,7 +101,7 @@ fixtures under `$HOME` (bd refuses `/tmp`-family "unsafe" locations; override th
 base with `BD_TESTS_TMPDIR`) and never touches a live repo. Locally:
 
 ```bash
-brew install bats-core shellcheck jq          # bd 1.1.x-1.2.x must already be installed
+brew install bats-core shellcheck jq          # bd 1.1.x-1.3.x must already be installed
 claude plugin validate .
 shellcheck plugins/*/scripts/*.sh && shellcheck -x test/helpers/setup.bash
 bats test/                                    # ~3 min

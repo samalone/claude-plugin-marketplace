@@ -8,8 +8,8 @@ description: >-
     oddly or the database seems corrupted or out of date, or when I say my
     config preferences have changed. It verifies the bd version and schema, runs
     the right health checks for the storage mode, turns off issues.jsonl
-    auto-export, ensures a refs/dolt/data remote over HTTPS rather than SSH plus
-    dolt.auto-push on single-writer projects, disables the branch-polluting
+    auto-export, ensures a refs/dolt/data remote over HTTPS rather than SSH,
+    turns dolt.auto-push off on every project, disables the branch-polluting
     backup git-push, and confirms everything works. Don't wait for me to spell
     out each step — invoke this whenever the task is "get this project's Beads
     config into my preferred state."
@@ -29,10 +29,10 @@ For a single-user, single-machine project:
 - **Either storage mode is fine.** Embedded and server mode are equally
   acceptable — in my experience server mode is much faster and just as
   reliable, so never treat server mode on a solo project as drift to fix or a
-  decision I need to make. Mode matters only where it genuinely changes a
-  setting (auto-push, below) or a health-check procedure — the auto-push
-  distinction is about *concurrent writers*, which server mode permits, not
-  about server mode being suspect.
+  decision I need to make. Mode no longer changes any config value — it affects
+  only which health checks are available (`bd sql` and `bd doctor` are
+  server-mode-only). `dolt.auto-push` used to branch on mode; it does not any
+  more, see below.
 - `issues.jsonl` auto-export **OFF**, and the file untracked, deleted, and
   gitignored — I don't read it and it only creates surprise edits and junk
   commits.
@@ -43,10 +43,11 @@ For a single-user, single-machine project:
   never SSH**. My SSH keys are held by 1Password's agent, so they exist only
   while 1Password is unlocked and I'm at the machine; a background auto-push
   over SSH fails unpredictably depending on the lock state and whether I'm AFK.
-- `dolt.auto-push` **ON** for single-writer (embedded) projects, so off-machine
-  durability happens in the background — but debounced, not instant (see the
-  auto-push note below). **OFF** for server/multi-writer projects (concurrent
-  auto-push to a git remote can corrupt remote history).
+- `dolt.auto-push` **OFF on every project, unconditionally** — set explicitly
+  to `false`, never left to the default. Off-machine sync is a deliberate
+  `bd sync` (or `bd dolt push`) that I run. See the auto-push note below for
+  why this is not mode-dependent and why "I am a single writer" is not a safe
+  enough premise to build on.
 - The backup system's git-push (`backup.git-push`) **OFF** — it force-commits
   and pushes on the working branch, which is exactly the friction I'm avoiding.
 - `dolt.auto-commit` left at bd's default (**on** in 1.1.0, regardless of mode)
@@ -307,25 +308,44 @@ Set each, then confirm with `bd config get`:
   `sync:`, and a remove/add cycle is exactly the sort of thing that can leave
   both. Grep for `remote:` in `.beads/config.yaml` and confirm exactly one
   uncommented line.
-- **Auto-push by mode:**
-    - Embedded / single-writer → `bd config set dolt.auto-push true`.
-    - Server / multi-writer → leave `dolt.auto-push` **off** (concurrent
-      writers auto-pushing to a git remote can corrupt remote history — this is
-      about concurrency, not a knock on server mode). Do not enable it here;
-      just note in the report that off-machine sync of issue data relies on
-      explicit `bd dolt push`.
-    - **Auto-push is debounced, not immediate — set expectations accordingly.**
-      It runs only after a `bd` write command, and only if at least
-      `dolt.auto-push-interval` (default ~5m per the docs) has passed since the
-      last push; the timestamp lives in `.beads/push-state.json`. Because it's
-      triggered by writes rather than a background timer, the _last_ writes of a
-      session may not push at all until the next session's first `bd` command
-      fires a check — so the off-machine copy can lag by up to the interval, or
-      by a whole idle gap. Auto-push is best-effort background durability, not
-      an instant mirror. If an up-to-the-moment off-machine copy matters, an
-      explicit `bd dolt push` is the only guarantee. (The interval key wasn't
-      visible in `bd config list` on the install we tested; if I ever want to
-      change it, verify the key name first rather than assuming.)
+- **Auto-push: turn it OFF, on every project.**
+    - `bd config set dolt.auto-push false`, then **verify with
+      `bd config get dolt.auto-push`** and check the file for a duplicate key.
+      Set it explicitly even when `bd config get` already reports `false`:
+      the default has changed before — bd's own source records that it once
+      "auto-enable[d] when an 'origin' remote exists" — so an unset key is an
+      inherited answer, not a stated one.
+    - **Why not mode-dependent, and why my own single-writer habits are not
+      enough.** The hazard is concurrent *push sources*, and the damage is to
+      the remote: per `cmd/bd/dolt_autopush.go`, git-protocol Dolt remotes have
+      no chunk-level upload atomicity, so concurrent pushes race on the remote
+      manifest and can leave it referencing chunks that were never uploaded —
+      and "any subsequent fetch/clone/push propagates the dangling reference."
+      It is silent corruption, not an error.
+    - **One machine is enough to cause it.** The push does NOT run inside the
+      dolt sql-server, so the server does not serialize it: `maybeAutoPush`
+      runs in the bd CLI process from `PersistentPostRun` and shells out. The
+      debounce does not protect either — load push-state, compare the interval,
+      push, save is an unlocked read-modify-write, so two `bd` write commands
+      landing in the same project within one push duration (up to the 30s
+      timeout) both decide a push is due and both push. Parallel agent sessions
+      in one project are therefore a multi-writer setup.
+    - So the rule is unconditional rather than a judgement call. I decided
+      (2026-09-17) that relying on me to foresee every source of concurrency is
+      too thin when the consequence is corrupted remote beads data.
+    - **The replacement is `bd sync`, run deliberately.** It pulls, detects
+      conflicts positively, recomputes the denormalized `is_blocked` (which a
+      bare push does not — a dependency edge merged from elsewhere otherwise
+      leaves `bd ready` stale), then pushes with bounded retry on a lost push
+      race. Exit codes: 0 synced, 1 error, 2 conflict halted, 3 retries
+      exhausted, 4 dirty working set stuck. Note it retries a *rejected* push;
+      it does not make simultaneous uploads safe either. A single scheduled
+      timer would be one push source by construction, which is the direction to
+      automate in eventually — a GitHub ref used as an atomic lock
+      (`--force-with-lease=refs/beads/push-lock:` for create-only semantics) is
+      the sketch, with stale-lock TTL as the unsolved part.
+    - Report that off-machine sync relies on explicit `bd sync`, for every
+      project rather than only server-mode ones.
 - **Disable backup git-push:** `bd config set backup.git-push false`, then
   **verify with `bd config get backup.git-push`**. This one auto-re-enables when
   a git remote exists (which step 4 just ensured), and it's the setting that
@@ -400,8 +420,8 @@ Set each, then confirm with `bd config get`:
 
 Summarize concisely: version and mode found (state the mode neutrally — server
 and embedded are both acceptable, so the mode itself is never an open
-question; for server mode just include the reminder that auto-push is off, so
-off-machine sync of issue data happens only on explicit `bd dolt push`),
+question; include the reminder that auto-push is off on every project, so
+off-machine sync of issue data happens only on an explicit `bd sync`),
 schema state (and whether you migrated), each config value before/after, and
 anything that needs my decision — a remote-backed database mid-migration, or a
 suspected pre-Dolt project you declined to touch. Do not narrate every command;

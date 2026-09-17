@@ -22,7 +22,7 @@
 #   * makes a temporary local backup of the Dolt database before any change,
 #   * transfers state by copying the Dolt data directory (never runs `bd init`),
 #     falling back to `bd bootstrap` from the remote if the copy doesn't verify,
-#   * flips `dolt.auto-push` to match the target mode (embedded=on, server=off),
+#   * normalizes `dolt.auto-push` to false in BOTH modes (see below),
 #   * rolls back to the original mode on any failure.
 #
 # Git hooks are NOT this script's business: `bd init` / `bd hooks install` own
@@ -259,13 +259,26 @@ cmd_switch() {
     _vraw=$(bd version 2>/dev/null) || _vraw=""
     _ver=$(awk '{print $3; exit}' <<<"$_vraw")
     step "Verifying configuration (embedded/server switch, bd ${_ver:-unknown})"
-    # Verified against 1.1.x and 1.2.2: `bd context` ("beads dir:"), `bd migrate
-    # --dry-run` ("Version matches"), `bd stats` ("Total Issues:"), `bd list
-    # --json`, `bd config get`, `bd bootstrap --yes`, and `bd dolt
-    # commit/push/start/stop/status/test/killall` all behave as used below.
-    # Refuse anything newer rather than running data-moving commands whose flags
-    # or output wording may have shifted.
-    case "$_ver" in 1.1.*|1.2.*) ;; *) die "this script is verified for bd 1.1.x-1.2.x; found: ${_ver:-unknown} — re-verify the commands above before widening this gate" ;; esac
+    # Verified against 1.1.x, 1.2.2 AND 1.3.0: `bd context` ("beads dir:"),
+    # `bd migrate --dry-run` ("Version matches"), `bd stats` ("Total Issues:"),
+    # `bd list --json` (array; .id/.status/.updated_at present, which is what
+    # fingerprint() selects), `bd config get`, and `bd dolt
+    # commit/push/pull/start/stop/status/test` all behave as used below.
+    # Re-verified on 1.3.0 2026-09-17 in a throwaway fixture; fingerprint() was
+    # run verbatim end-to-end.
+    #
+    # ONE KNOWN EXCEPTION, and it is not a version problem: `bd bootstrap --yes`
+    # as called by transfer_via_bootstrap FAILS for a `server` target on 1.2.2
+    # and 1.3.0 alike, with "failed to reconcile shared-server metadata: dial
+    # tcp 127.0.0.1:0". The cause is this script's own sequencing — the fallback
+    # runs while BEADS_DOLT_AUTO_START=0 is still exported and dolt_mode has
+    # already been flipped to the target, so bd resolves server port 0 and dials
+    # nothing. A/B tested against both versions: identical failure. So the
+    # fallback has never worked for embedded->server in any bd version; it is
+    # simply never reached, because the `cp -R` path has never failed in
+    # practice (ten switches on 2026-09-17, all via cp). Left as-is rather than
+    # fixed blind: see the TODO at transfer_via_bootstrap.
+    case "$_ver" in 1.1.*|1.2.*|1.3.*) ;; *) die "this script is verified for bd 1.1.x-1.3.x; found: ${_ver:-unknown} — re-verify the commands above before widening this gate" ;; esac
     [ "$BACKEND" = dolt ] || die "backend is '$BACKEND', expected 'dolt'"
     case "$CUR" in embedded|server) ;; *) die "unexpected current dolt_mode: '$CUR'";; esac
 
@@ -329,8 +342,17 @@ cmd_switch() {
 
     set_dolt_mode "$TGT"
     case "$TGT" in
-        embedded) set_auto_push true  ;;   # single-writer: background durability on
-        server)   set_auto_push false ;;   # multi-writer: avoid concurrent auto-push to git remote
+        # Both modes get false, deliberately. This used to branch on mode, on the
+        # premise that embedded implies a single writer. It does not: the push
+        # runs in the bd CLI process (PersistentPostRun, shells out), NOT inside
+        # the dolt sql-server, and its debounce is an unlocked read-modify-write
+        # of .beads/push-state.json. So two bd writes in one project within a
+        # push duration both push, on one machine, in either mode — and
+        # git-protocol Dolt remotes have no chunk-level upload atomicity, so
+        # concurrent pushes can strand the remote manifest silently. Policy is
+        # therefore unconditional; off-machine sync is a deliberate `bd sync`.
+        embedded) set_auto_push false ;;
+        server)   set_auto_push false ;;
     esac
 
     # ---- Phase D: transfer state into the new data dir (no bd init) -------
@@ -393,6 +415,17 @@ cmd_switch() {
 }
 
 # Populate the (current dolt_mode's) data dir from the up-to-date remote.
+#
+# TODO (verified broken 2026-09-17, on BOTH 1.2.2 and 1.3.0): this cannot work
+# for a `server` target as sequenced. Callers reach it with
+# BEADS_DOLT_AUTO_START=0 still exported and dolt_mode already set to the
+# target, so bd resolves server port 0 and fails with "failed to reconcile
+# shared-server metadata: dial tcp 127.0.0.1:0". It is unreached in practice
+# (the cp -R path has never failed), so this is a dead safety net rather than a
+# live bug. Fixing it likely means starting the target server before
+# bootstrapping, or bootstrapping while still in the SOURCE mode and moving the
+# data afterwards — either is a real change to the switch's ordering and wants
+# its own test, so it is recorded rather than guessed at here.
 transfer_via_bootstrap() {
     bd bootstrap --yes >/dev/null 2>&1 || bd bootstrap -y >/dev/null 2>&1 \
         || die "bd bootstrap failed to clone from remote"

@@ -80,9 +80,13 @@ make_project() {
 #   * refs/dolt/data   — must exist on origin; created by the first `bd dolt push`.
 #   * export.auto      — false (bd's default; asserted here so a default change
 #                        surfaces as a test failure rather than a silent warning).
-#   * dolt.auto-push   — true, as a single flat line, matching what the audit
-#                        specifies for an embedded single-writer project and what
-#                        the script's own set_auto_push writes.
+#   * dolt.auto-push   — false, as a single flat line. The audit now specifies
+#                        false on EVERY project regardless of mode (the push is
+#                        client-side with an unlocked debounce, so even one
+#                        machine with parallel sessions races the remote
+#                        manifest), and set_auto_push writes false in both
+#                        directions. Seeded false so the round-trip test proves
+#                        the value is NORMALIZED rather than merely unchanged.
 prepare_for_switch() {
     ( cd "$PROJECT" && bd dolt commit -m "fixture: initial" >/dev/null 2>&1 ) || true
     ( cd "$PROJECT" && bd dolt push >/dev/null 2>&1 ) \
@@ -94,7 +98,7 @@ prepare_for_switch() {
         || { echo "fixture: bd init did not write sync.remote" >&2; return 1; }
 
     append_config_line 'export.auto: false'
-    append_config_line 'dolt.auto-push: true'
+    append_config_line 'dolt.auto-push: false'
 }
 
 # append_config_line <line> — append to the fixture's config.yaml, first ensuring

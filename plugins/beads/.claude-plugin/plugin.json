@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "beads",
   "description": "Everything for beads (bd) projects: self-gating workflow guidance, the /beads:plan bead-planning skill, the /beads:config-audit Dolt configuration audit, and the /beads:change-mode embedded/server mode switcher.",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "author": {
     "name": "Stuart A. Malone",
     "email": "samalone@llamagraphics.com"
