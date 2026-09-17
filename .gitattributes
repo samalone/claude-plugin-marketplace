@@ -1,0 +1,14 @@
+# Shell scripts must stay LF on every platform. Nothing here normalized line
+# endings before, and `git check-attr` reported eol: unspecified, so a Windows
+# checkout under core.autocrlf=true would produce CRLF. bash treats the stray
+# \r as part of the last token on each line, which fails in ways that read as
+# logic bugs rather than as an encoding problem.
+*.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+
+# Same reasoning for the files hooks and CI read as scripts or data.
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
