@@ -469,12 +469,31 @@ Set each, then confirm with `bd config get`:
   this default by mode, and that error hasn't shown up at my scale, whereas the
   dirty-working-set brick has. Leave it on.)
 
-- **`Agent Doc Divergence`: opt out, and check whether `AGENTS.md` is stale.**
-  bd 1.3.0 warns when `AGENTS.md` and `CLAUDE.md` differ outside the
-  `BEGIN/END BEADS INTEGRATION` markers, and offers four remedies. On my
-  projects the first three are **destructive**: `CLAUDE.md` is the real,
-  hand-written project instruction file and may carry no bd-managed block at
-  all, while `AGENTS.md` is bd's generated agent primer. Symlinking them, or
+- **`Agent Doc Divergence`: check for a symlink FIRST, then opt out.**
+
+  **`[ -L AGENTS.md ]` before anything else.** In 5 of my 18 projects
+  (`entwine`, `legible`, `drupal6-docker`, `registrar`, `n2y`) `AGENTS.md` is a
+  **symlink to `CLAUDE.md`**. That is bd's own option (a) — `ln -sf AGENTS.md
+  CLAUDE.md` — already applied, and it *resolves* the divergence rather than
+  suppressing it, because there is only one file. So on a symlinked project:
+    - Do **not** add the opt-out comment. There is no divergence to opt out of,
+      and the comment's own text ("this file is bd's generated primer,
+      `CLAUDE.md` is hand-written") is **false** when they are one file — worse
+      than noise, since a later reader will act on it.
+    - Remember that every write "to `AGENTS.md`" lands in `CLAUDE.md`. A block
+      refresh still works and is still correct; it just shows up as a
+      `CLAUDE.md` diff with no `AGENTS.md` entry in `git status`. That absence
+      is the tell if you forgot to check for the link.
+    - `git add AGENTS.md` is a no-op for the symlink itself, so stage
+      `CLAUDE.md`.
+
+  I got this wrong on the first two before adding the check, and had to strip
+  the opt-out back out of both.
+
+  For a genuine pair of independent files, bd's warning stands and its first
+  three remedies are **destructive**: `CLAUDE.md` is the real, hand-written
+  project instruction file and may carry no bd-managed block at all, while
+  `AGENTS.md` is bd's generated agent primer. Symlinking them *now*, or
   regenerating `CLAUDE.md` with `AGENTS.md` as the "source of truth", throws
   away the project instructions. Take option (d) — the divergence is
   intentional — by appending to `AGENTS.md`, **after** the END marker:
@@ -563,6 +582,11 @@ Set each, then confirm with `bd config get`:
   `hasBeadsPlugin` would have returned true and bd would have believed the
   public plugin was supplying hooks when this plugin only supplied guidance —
   a silent false "plugin-managed" on every machine. The rename retired it.
+
+  **When NEITHER file has a marker** (`ap-cloud`), both are hand-written for
+  different readers, so there is no block to refresh and nothing to reconcile.
+  Still add the opt-out, but say *that* rather than describing one file as
+  bd-generated — again, an accurate reason or none.
 
   **Regeneration only reaches the marked block — this is the trap.**
   `ReplaceSectionWithOpts` rebuilds `content[:beginIdx] + <fresh section> +
