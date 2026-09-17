@@ -491,13 +491,26 @@ Set each, then confirm with `bd config get`:
   WORKFLOW" mandating `git pull --rebase`, which contradicts my plain-merge
   rule.
 
-  **Refreshing the block: use `bd setup factory` (or `opencode`).** Both are
+  **First: only refresh a block that is already there.** Do this *only* when
+  `AGENTS.md` exists **and** already contains a `<!-- BEGIN BEADS INTEGRATION`
+  marker. Check that yourself before calling `bd setup`, because the recipe
+  will happily *create* `AGENTS.md` where none exists, and I don't want one
+  conjured up just to have a bd block in it — an agent-instructions file no
+  tool here reads is one more file to keep current. If the file is missing,
+  skip this step and say so. If it exists but has no marker, skip it too, for
+  the same reason `CLAUDE.md` is left alone: don't inject a managed block into
+  a hand-written file.
+
+  **Refreshing the block: use `bd setup opencode`.** It and `factory` are both
   `TypeSection` recipes on `AGENTS.md` in `internal/recipes/recipes.go`, and
   their rendered bodies are byte-identical (verified with `diff` on 1.3.0), so
   the recipe name is only a label for which tool you are nominally
-  configuring. **Use `factory`**, so all 18 projects stay on one recipe; the
-  choice leaves no trace in the file anyway (the marker records the *profile*,
-  not the recipe). `--check` reports the state
+  configuring. Use `opencode` — it is a tool I actually use sometimes, and one
+  recipe across all projects avoids pointless variation. The choice leaves no
+  trace in the file: the marker records the *profile*, not the recipe, and the
+  two recipes each report the other's installed block as "current" (verified
+  on life-balance, which was refreshed with `factory` before this was settled
+  — so there is nothing to redo there). `--check` reports the state
   ("installed but stale" means it found the block and will replace it, even a
   bare pre-versioned marker, because `ReplaceSectionWithOpts` matches the
   BEGIN marker by *prefix*). `--print` previews the body, read-only, without
