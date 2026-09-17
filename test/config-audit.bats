@@ -325,3 +325,147 @@ EOF
     [ "$status" -eq 1 ]
     [[ "$output" != *"STOP conditions present"* ]]
 }
+
+# =============================================================================
+# --apply
+# =============================================================================
+
+# apply [args...] — run the repair pass in the fixture.
+apply() { run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network --apply $*"; }
+
+@test "config-audit: --apply without --yes prints a plan and changes nothing" {
+    make_project
+    local cfg git_state
+    cfg="$(cksum < "$PROJECT/.beads/config.yaml")"
+    git_state="$(git -C "$PROJECT" status --short)"
+
+    apply
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Would apply"* ]]
+    [[ "$output" == *"Re-run with --yes"* ]]
+    [ "$(cksum < "$PROJECT/.beads/config.yaml")" = "$cfg" ]
+    [ "$(git -C "$PROJECT" status --short)" = "$git_state" ]
+}
+
+@test "config-audit: --apply --yes sets the config keys and re-audits clean" {
+    make_project
+    apply --yes
+    [[ "$output" == *"set export.auto=false"* ]]
+    [[ "$output" == *"set dolt.auto-push=false"* ]]
+    [[ "$output" == *"set backup.git-push=false"* ]]
+
+    # The trailing report is a fresh audit, so these must now read OK.
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network"
+    [ "$(status_of 'config.export.auto')" = "OK" ]
+    [ "$(status_of 'config.dolt.auto-push')" = "OK" ]
+    [ "$(status_of 'config.backup.git-push')" = "OK" ]
+}
+
+@test "config-audit: --apply --yes collapses the flat/nested ambiguity" {
+    make_project
+    append_config_line 'dolt.auto-push: false'
+    append_config_line 'dolt:'
+    printf '    auto-push: true\n' >> "$PROJECT/.beads/config.yaml"
+
+    apply --yes
+    [ "$(grep -c 'auto-push' "$PROJECT/.beads/config.yaml")" -eq 1 ]
+    [ "$(grep -cE '^dolt\.auto-push: false$' "$PROJECT/.beads/config.yaml")" -eq 1 ]
+}
+
+@test "config-audit: --apply refuses outright when a STOP is present" {
+    make_project
+    local cfg; cfg="$(cksum < "$PROJECT/.beads/config.yaml")"
+    # A tracked machine credential is a STOP. (Corrupting metadata.json would
+    # not do: it breaks `bd context`, so the script dies at exit 3 long before
+    # the STOP logic — a worse failure, but not the one under test.)
+    printf 'secret\n' > "$PROJECT/.beads-credential-key"
+    git -C "$PROJECT" add -f .beads-credential-key
+
+    apply --yes
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"REFUSING to apply"* ]]
+    [ "$(cksum < "$PROJECT/.beads/config.yaml")" = "$cfg" ]   # nothing touched
+}
+
+@test "config-audit: --apply will not delete issues.jsonl without an off-machine copy" {
+    make_project
+    # No `bd dolt push` has happened here, so origin has no refs/dolt/data. The
+    # file is not a backup, but it can be the only off-machine copy that exists,
+    # so the deletion step re-checks durability itself rather than trusting that
+    # an earlier repair in the same run succeeded.
+    printf '{"id":"x-1"}\n' > "$PROJECT/.beads/issues.jsonl"
+    git -C "$PROJECT" add -f .beads/issues.jsonl
+    git -C "$PROJECT" -c user.name=t -c user.email=t@e.invalid commit -qm "seed"
+
+    # --no-network so no push repair runs. The guard does its OWN ls-remote
+    # regardless of that flag: declining to delete on the strength of a check
+    # that was skipped would be the worst possible reading of it.
+    apply --yes
+    [[ "$output" == *"NOT removing it"* ]]
+    [ -f "$PROJECT/.beads/issues.jsonl" ]
+    git -C "$PROJECT" ls-files --error-unmatch .beads/issues.jsonl >/dev/null
+}
+
+@test "config-audit: --apply removes issues.jsonl once refs/dolt/data exists" {
+    make_project --ready                      # --ready pushes refs/dolt/data
+    printf '{"id":"x-1"}\n' > "$PROJECT/.beads/issues.jsonl"
+    git -C "$PROJECT" add -f .beads/issues.jsonl
+    git -C "$PROJECT" -c user.name=t -c user.email=t@e.invalid commit -qm "seed"
+
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --apply --yes"
+    [ ! -f "$PROJECT/.beads/issues.jsonl" ]
+    run git -C "$PROJECT" ls-files --error-unmatch .beads/issues.jsonl
+    [ "$status" -ne 0 ]
+    grep -qxF '.beads/issues.jsonl' "$PROJECT/.gitignore"
+}
+
+@test "config-audit: --apply untracks interactions.jsonl but KEEPS the file" {
+    make_project --ready
+    # An append-only audit trail that survives Dolt GC/flatten — a real recovery
+    # path, not a redundant snapshot. Untrack it; never delete it.
+    printf '{"event":"x"}\n' > "$PROJECT/.beads/interactions.jsonl"
+    git -C "$PROJECT" add -f .beads/interactions.jsonl
+    git -C "$PROJECT" -c user.name=t -c user.email=t@e.invalid commit -qm "seed"
+
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --apply --yes"
+    [ -f "$PROJECT/.beads/interactions.jsonl" ]               # kept
+    run git -C "$PROJECT" ls-files --error-unmatch .beads/interactions.jsonl
+    [ "$status" -ne 0 ]                                       # but untracked
+}
+
+@test "config-audit: --apply removes the false opt-out on a symlinked pair" {
+    make_project
+    printf '# Project\n\n<!-- bd-doctor-divergence: ok -->\n' > "$PROJECT/CLAUDE.md"
+    rm -f "$PROJECT/AGENTS.md"
+    ln -s CLAUDE.md "$PROJECT/AGENTS.md"
+    git -C "$PROJECT" add CLAUDE.md AGENTS.md
+
+    apply --yes
+    ! grep -q 'bd-doctor-divergence' "$PROJECT/CLAUDE.md"
+    [ -L "$PROJECT/AGENTS.md" ]                               # link itself untouched
+}
+
+@test "config-audit: --apply never makes a git commit" {
+    make_project --ready
+    local head; head="$(git -C "$PROJECT" rev-parse HEAD)"
+    apply --yes
+    [ "$(git -C "$PROJECT" rev-parse HEAD)" = "$head" ]
+    [[ "$output" == *"Nothing was committed to git"* ]]
+}
+
+@test "config-audit: --apply appends to a gitignore with no trailing newline" {
+    make_project --ready
+    # bd writes these files with no trailing byte, so a naive >> lands on the end
+    # of the last line and silently corrupts it.
+    printf 'existing-pattern' > "$PROJECT/.gitignore"        # deliberately unterminated
+    apply --yes
+    grep -qxF 'existing-pattern' "$PROJECT/.gitignore"
+    grep -qxF '.beads/interactions.jsonl' "$PROJECT/.gitignore"
+}
+
+@test "config-audit: --json cannot be combined with --apply" {
+    make_project
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --json --apply"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"reporting mode"* ]]
+}

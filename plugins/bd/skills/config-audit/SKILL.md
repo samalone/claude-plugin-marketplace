@@ -192,10 +192,16 @@ never starts or stops a server — so it is always safe to run first, on any
 project, before deciding anything.
 
 ```bash
-"<plugin>/scripts/config-audit.sh"               # report
-"<plugin>/scripts/config-audit.sh" --json        # same findings, machine-readable
-"<plugin>/scripts/config-audit.sh" --no-network  # skip the ls-remote probe (fast sweeps)
+"<plugin>/scripts/config-audit.sh"                 # report (read-only)
+"<plugin>/scripts/config-audit.sh" --json          # same findings, machine-readable
+"<plugin>/scripts/config-audit.sh" --no-network    # skip the ls-remote probe (fast sweeps)
+"<plugin>/scripts/config-audit.sh" --apply         # print the repair plan, change nothing
+"<plugin>/scripts/config-audit.sh" --apply --yes   # perform the repairs, then re-audit
 ```
+
+**Always show me the `--apply` plan before running `--apply --yes`**, unless I
+have already said to go ahead. The plan is read-only and lists the repairs in the
+order they would run.
 
 It needs `bd`, `git`, `jq`, and **mikefarah/yq v4** (`brew install yq`,
 `winget install MikeFarah.yq`). It refuses to run against kislyuk/yq, the
@@ -206,15 +212,30 @@ call) / `INFO` / `STOP` (do not let a repair pass near this project). Exit codes
 0 clean, 1 drift, 2 a STOP condition, 3 script error.
 
 **Read its output, then do only the repairs it flagged.** Don't re-derive the
-whole procedure by hand — the steps below are the rationale for each check and
-the instructions for the repairs, which are still yours to apply. In particular,
-the script deliberately does **not** decide any of these; they stay with me:
+whole procedure by hand — the steps below are the rationale behind each check,
+and the manual instructions for anything `--apply` leaves alone.
+
+`--apply` repairs only `FAIL` findings, only when **no `STOP` is present**, and
+never touches a `WARN`. The repair order is a safety property, not a convenience:
+the remote must exist, be on HTTPS, and have taken a real push before anything
+deletes `issues.jsonl` — and that step re-runs its own `ls-remote` rather than
+trusting an earlier repair in the same run, because it is the one step that
+destroys data. It makes **no git commit**: the working tree is left for review.
+It does push `refs/dolt/data`, which is what establishes the durability the
+ordering depends on.
+
+The script deliberately does **not** decide any of these; they stay with me:
 
 - a suspected pre-Dolt (0.x) project, or a non-zero-count pending migration
 - deleting the duplicated pre-BEGIN residue in `AGENTS.md` (it reports the line
   numbers; removing them is a content decision — propose it, don't act)
 - any doctor warning outside the two known-policy suppressions
 - whether `interactions.jsonl` should start travelling, if I go multi-machine
+- moving a memory note that is stuck *inside* bd's managed block (finding the
+  section's end is a content call, so this reports as WARN and is never applied)
+- topping up gitignore patterns in **embedded** mode, where bd offers no
+  mechanism at all — `bd doctor` is unsupported there and exits 0 anyway, and
+  `bd init` refuses to re-run
 
 If the script refuses on the bd version gate, stop and tell me rather than
 widening it: every check parses bd's output, and bd is a fast-moving tool.

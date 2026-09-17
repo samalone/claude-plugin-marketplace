@@ -4,15 +4,22 @@
 #                   single-user Dolt preferences described by the
 #                   /bd:config-audit skill.
 #
-#   config-audit.sh                 human-readable report
-#   config-audit.sh --json          same findings as JSON
+#   config-audit.sh                 human-readable report (READ-ONLY)
+#   config-audit.sh --json          same findings as JSON  (READ-ONLY)
 #   config-audit.sh --no-network    skip the `git ls-remote` probe
+#   config-audit.sh --apply         print the repair plan, change nothing
+#   config-audit.sh --apply --yes   perform the repairs, then re-audit
 #
-# THIS SCRIPT NEVER WRITES ANYTHING. It does not run `bd config set`, does not
-# touch .beads/, does not stage or commit, and does not start or stop a server.
-# Every finding it reports as FAIL is drift that a future --apply pass (or you)
-# would repair; the audit itself only looks. That is deliberate: it is meant to
-# be safe to run across every project in one sweep before anything acts.
+# WITHOUT --apply THIS SCRIPT WRITES NOTHING. It does not run `bd config set`,
+# does not touch .beads/, does not stage or commit, and does not start or stop a
+# server. That is deliberate: the audit is meant to be safe to run across every
+# project in one sweep before anything acts.
+#
+# `--apply` repairs only FAIL findings, only those named in REPAIR_ORDER, and
+# only when no STOP finding is present. WARN is a judgement call and is never
+# acted on. It never makes a git commit — it leaves the working tree for you to
+# review — but it does push refs/dolt/data, because the skill's ordering
+# requires an off-machine copy to exist before anything is deleted.
 #
 # Findings carry a status:
 #   OK    matches the preferred state
@@ -88,17 +95,22 @@ need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 # ---------------------------------------------------------------------------
 OUT=text
 NETWORK=1
+APPLY=0
+ASSUME_YES=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --json)       OUT=json ;;
         --no-network) NETWORK=0 ;;
+        --apply)      APPLY=1 ;;
+        --yes|-y)     ASSUME_YES=1 ;;
         -h|--help)
-            sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) die "unknown argument: $1 (try --help)" ;;
     esac
     shift
 done
+[ "$APPLY" = 1 ] && [ "$OUT" = json ] && die "--json is a reporting mode; it cannot be combined with --apply"
 
 # ---------------------------------------------------------------------------
 # tooling
@@ -366,10 +378,16 @@ check_yaml_key backup.git-push false "this one auto-re-enables whenever a git re
 # will NOT appear in config.yaml, and its absence there is not a failed write.
 # `bd config get` prints "<key> (not set)" on stdout and exits 0, so presence
 # must be read from the text, never from $?.
+# stdout ONLY, and the LAST non-empty line of it. Merging stderr (2>&1) makes any
+# warning bd happens to emit first — e.g. "auto-import from .beads/issues.jsonl
+# failed: validation failed for issue X" — become the value, so a key reads as
+# set to the text of an unrelated complaint. Caught on a fixture carrying a bad
+# issues.jsonl, which is exactly the state this audit exists to clean up.
 bdcfg() {
     local out
-    out=$(bd config get "$1" 2>&1) || out=""
-    out=$(strip_cr "${out%%$'\n'*}")
+    out=$(bd config get "$1" 2>/dev/null) || out=""
+    out=$(awk 'NF { last = $0 } END { printf "%s", last }' <<<"$out")
+    out=$(strip_cr "$out")
     case "$out" in
         *"(not set)"*) printf '' ;;
         *)             printf '%s' "$out" ;;
@@ -604,7 +622,7 @@ else
         _endm=$(awk '/<!-- END BEADS INTEGRATION/ { print NR; exit }' "$CLAUDEMD")
         _notel=$(awk -v s="$MEMNOTE" 'index($0, s) { print NR; exit }' "$CLAUDEMD")
         if [ -n "$_endm" ] && [ -n "$_notel" ] && [ "$_notel" -lt "$_endm" ]; then
-            f_fail "claudemd.memory-note" "present at line $_notel but INSIDE bd's managed block (END marker at line $_endm) — it will be lost on the next \`bd init\` or upgrade"
+            f_warn "claudemd.memory-note" "present at line $_notel but INSIDE bd's managed block (END marker at line $_endm) — it will be lost on the next \`bd init\` or upgrade. Not auto-repaired: moving it means deciding where the section ends, which is a content call on a tracked file."
         else
             f_ok "claudemd.memory-note" "present once, outside the managed block"
         fi
@@ -656,7 +674,336 @@ else
 fi
 
 # ===========================================================================
-# 9. Report
+# 9. Repairs (--apply)
+# ===========================================================================
+# Only FAIL findings are repaired, and only the ones named in REPAIR_ORDER.
+# WARN is a judgement call and STOP means stop, so neither is ever acted on.
+#
+# THE ORDER IS THE SAFETY PROPERTY, not a convenience. Durability comes first:
+# the remote must exist, be on HTTPS, and have taken a real push before anything
+# deletes issues.jsonl. That file is not a backup, but on a project with no
+# remote yet it can be the only off-machine copy in existence — so the deletion
+# step re-checks that the push actually landed and declines if it did not,
+# rather than trusting that an earlier step in this same list succeeded.
+REPAIR_ORDER='
+config.line-endings
+remote.present
+remote.transport
+remote.ref
+schema.state
+config.export.auto
+config.dolt.auto-push
+config.backup.git-push
+config.doctor.suppress.dolt-remote-vs-git-origin
+config.doctor.suppress.cursor-integration
+verify.dolt-clean
+files.issues-jsonl
+files.interactions-jsonl
+gitignore.dolt-server-config
+gitignore.untracked
+agents.optout
+agents.block
+claudemd.memory-note
+'
+
+has_fail() { grep -q "^FAIL	$1	" "$FINDINGS" 2>/dev/null; }
+
+# Repair log, rendered after the run.
+APPLIED="$WORK/applied.txt"; : > "$APPLIED"
+did()     { printf '  ✓ %s\n' "$*" >> "$APPLIED"; }
+skipped() { printf '  — %s\n' "$*" >> "$APPLIED"; }
+
+# --- editing helpers -----------------------------------------------------
+
+# Append a line to a file that may not end in a newline. `bd init` writes
+# config.yaml and the gitignores with no trailing byte, so a naive >> lands on
+# the end of the last line and silently corrupts it.
+append_line() {   # <file> <line>
+    [ -e "$1" ] || : > "$1"
+    if [ -s "$1" ] && [ -n "$(tail -c1 "$1")" ]; then printf '\n' >> "$1"; fi
+    printf '%s\n' "$2" >> "$1"
+}
+
+# Set a YAML key to a bare (unquoted) scalar, collapsing the flat/nested
+# ambiguity onto the flat spelling that bd's own precedence prefers.
+set_yaml_key() {   # <dotted.key> <bare-value>
+    local key=$1 val=$2 ns leaf st pres
+    ns=${key%%.*}; leaf=${key#*.}
+    st=$(yaml_state "$key"); pres=${st%%$'\t'*}
+    if [ "$pres" = nested ] || [ "$pres" = both ]; then
+        yq -i "del(.\"$ns\"[\"$leaf\"])" "$CFG"
+        # Drop a parent left childless by that delete, so the file returns to
+        # exactly one representation. Verified byte-identical to a pristine
+        # config; a parent that still has other children is left alone.
+        yq -i "del(.\"$ns\" | select(. == null or length == 0))" "$CFG"
+    fi
+    yq -i ".\"$key\" = $val" "$CFG"
+    # Re-read through the same path the audit uses, not through `bd config get`:
+    # config routing for some keys has been buggy and a `set` that reports
+    # success may not have taken.
+    st=$(yaml_state "$key"); pres=${st%%$'\t'*}
+    [ "$pres" = flat ] && [ "${st#*$'\t'}" = "$val" ] \
+        || die "failed to set $key=$val in $CFG (now: $st)"
+}
+
+# scp-style and ssh:// URLs to their https:// equivalent. Only the transport is
+# normalized — the git+ prefix is left exactly as found, because both spellings
+# are in use, both work, and bd writes git+ itself on current versions.
+to_https() {   # <url>
+    local u=$1 pre=""
+    case "$u" in git+*) pre="git+"; u=${u#git+} ;; esac
+    case "$u" in
+        ssh://*)  u=${u#ssh://} ;;
+        https://*) printf '%s%s' "$pre" "$u"; return ;;
+        *) : ;;
+    esac
+    u=${u#git@}                      # user prefix, scp-style or not
+    case "$u" in *@*) u=${u#*@} ;; esac
+    # scp-style separates host from path with ':' rather than '/'
+    case "$u" in
+        */*) : ;;
+        *:*) u="${u%%:*}/${u#*:}" ;;
+    esac
+    u=$(printf '%s' "$u" | sed 's/:/\//')
+    printf 'https://%s' "$u"
+}
+
+apply_one() {
+    case "$1" in
+
+    config.line-endings)
+        # Only the line terminator, never a CR inside a value.
+        awk '{ sub(/\r$/, ""); print }' "$CFG" > "$CFG.tmp$$" && mv -f "$CFG.tmp$$" "$CFG"
+        did "normalized config.yaml to LF" ;;
+
+    remote.present)
+        local gurl hurl
+        gurl=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null) || gurl=""
+        [ -n "$gurl" ] || { skipped "no remote: git has no 'origin' to derive one from — tell me, do not guess"; return 0; }
+        hurl=$(to_https "$gurl")
+        case "$hurl" in
+            https://*|git+https://*) ;;
+            *) skipped "no remote: could not derive an HTTPS URL from origin ($gurl)"; return 0 ;;
+        esac
+        # `bd dolt remote add` writes the correct sync.remote key itself, so the
+        # config is never hand-edited or the key name guessed.
+        bd dolt remote add origin "$hurl" >/dev/null 2>&1 \
+            || { skipped "no remote: \`bd dolt remote add\` failed"; return 0; }
+        REMOTE_URL=$hurl
+        did "added Dolt remote origin -> $hurl" ;;
+
+    remote.transport)
+        [ -n "$REMOTE_URL" ] || { skipped "SSH remote: nothing registered to repair"; return 0; }
+        local hurl; hurl=$(to_https "$REMOTE_URL")
+        # There is no set-url: `bd dolt remote` offers only add/list/remove.
+        # Removing drops the local registration only — it does not touch
+        # refs/dolt/data on the server or anything in the local database.
+        bd dolt remote remove origin >/dev/null 2>&1 \
+            || { skipped "SSH remote: \`bd dolt remote remove\` failed"; return 0; }
+        bd dolt remote add origin "$hurl" >/dev/null 2>&1 \
+            || die "removed the SSH remote but could not add the HTTPS one ($hurl) — re-add it before doing anything else"
+        did "moved the Dolt remote from SSH to HTTPS: $REMOTE_URL -> $hurl"
+        REMOTE_URL=$hurl ;;
+
+    remote.ref)
+        if bd dolt push >/dev/null 2>&1; then
+            did "pushed refs/dolt/data to origin (first off-machine copy)"
+        else
+            skipped "refs/dolt/data: \`bd dolt push\` failed — nothing that deletes data will run"
+        fi ;;
+
+    schema.state)
+        # Only ever reached for the zero-registered-migrations case: a metadata
+        # version stamp, no DDL and no data rewrite. A real migration is a STOP
+        # finding, and --apply refuses to run at all when one is present.
+        if bd migrate >/dev/null 2>&1; then
+            did "applied the schema version stamp (\`bd migrate\`, 0 registered migrations)"
+            bd dolt push >/dev/null 2>&1 && did "pushed the migrated database"
+        else
+            skipped "schema stamp: \`bd migrate\` failed"
+        fi ;;
+
+    config.export.auto)    set_yaml_key export.auto    false; did "set export.auto=false" ;;
+    config.dolt.auto-push) set_yaml_key dolt.auto-push false; did "set dolt.auto-push=false (off on every project; sync is a deliberate \`bd sync\`)" ;;
+    config.backup.git-push) set_yaml_key backup.git-push false; did "set backup.git-push=false" ;;
+
+    config.doctor.suppress.*)
+        # These live in the beads database, not config.yaml, so there is nothing
+        # to grep for afterwards and their absence from the YAML is not a failed
+        # write. Verify through `bd config get`.
+        local key=${1#config.}
+        bd config set "$key" true >/dev/null 2>&1 || { skipped "$key: \`bd config set\` failed"; return 0; }
+        if [ "$(bdcfg "$key")" = true ]; then
+            did "set $key=true (db-resident; travels on refs/dolt/data)"
+        else
+            skipped "$key: set reported success but \`bd config get\` does not agree"
+        fi ;;
+
+    verify.dolt-clean)
+        # Writing the suppress keys dirties the config table in the Dolt working
+        # set, which surfaces as Dolt Status / Dolt Locks warnings. Clear it here
+        # rather than leaving it to bd's "auto-commit on next command": a dirty
+        # working set is the state that blocks migrations.
+        if bd vc commit -m "config-audit: bring config into the audited state" >/dev/null 2>&1; then
+            did "committed the Dolt working set"
+            bd dolt push >/dev/null 2>&1 && did "pushed the config commit"
+        else
+            skipped "Dolt working set: \`bd vc commit\` failed"
+        fi ;;
+
+    files.issues-jsonl)
+        # Re-check durability here rather than trusting an earlier step in this
+        # list: this is the one repair that destroys data.
+        local ref; ref=$(git -C "$REPO_ROOT" ls-remote origin refs/dolt/data 2>/dev/null) || ref=""
+        if [ -z "$ref" ]; then
+            skipped "issues.jsonl: origin still has no refs/dolt/data, so this file may be the only off-machine copy — NOT removing it"
+            return 0
+        fi
+        local rel; rel=$(relp "$ISSUES")
+        if is_tracked "$rel"; then
+            if git -C "$REPO_ROOT" rm -f --quiet -- "$rel" >/dev/null 2>&1; then
+                did "git rm'd $rel (staged, not committed)"
+            else
+                skipped "issues.jsonl: \`git rm\` failed"
+            fi
+        elif [ -f "$ISSUES" ]; then
+            rm -f "$ISSUES" && did "deleted untracked $rel"
+        fi
+        is_ignored "$rel" || { append_line "$REPO_ROOT/.gitignore" ".beads/issues.jsonl"; did "gitignored .beads/issues.jsonl"; } ;;
+
+    files.interactions-jsonl)
+        # NOT the same kind of thing as issues.jsonl: an append-only audit log
+        # that survives Dolt GC/flatten, so it is a real recovery trail. Untrack
+        # it, never delete it, and never disable the logging.
+        local rel; rel=$(relp "$INTER")
+        if is_tracked "$rel"; then
+            if git -C "$REPO_ROOT" rm --cached --quiet -- "$rel" >/dev/null 2>&1; then
+                did "untracked $rel with \`git rm --cached\` (working file kept)"
+            else
+                skipped "interactions.jsonl: \`git rm --cached\` failed"
+            fi
+        fi
+        is_ignored "$rel" || { append_line "$REPO_ROOT/.gitignore" ".beads/interactions.jsonl"; did "gitignored .beads/interactions.jsonl"; } ;;
+
+    gitignore.dolt-server-config)
+        append_line "$BEADS_DIR/.gitignore" 'dolt-server-config.yaml'
+        did "added 'dolt-server-config.yaml' to .beads/.gitignore (bd omits it from its own pattern list)" ;;
+
+    gitignore.untracked)
+        # bd maintains .beads/.gitignore and the project .gitignore from its own
+        # requiredPatterns, append-only on an existing file, so delegating is
+        # safe and local rules survive. Don't copy that list here; it grows
+        # between versions and a copy would drift.
+        if [ "$MODE" = server ]; then
+            bd doctor --fix --yes >/dev/null 2>&1 || true
+            did "ran \`bd doctor --fix --yes\` to top up bd's gitignore patterns (this rewrites the tracked project .gitignore)"
+        else
+            skipped "gitignore patterns: no bd mechanism in embedded mode — doctor is unsupported there and exits 0 anyway, and \`bd init\` refuses to re-run. Compare .beads/.gitignore against bd's list by hand."
+        fi ;;
+
+    agents.optout)
+        if [ "$AG_MODE" = 120000 ]; then
+            # One file wearing two names: the comment's own text is false here.
+            awk -v s="$OPTOUT" 'index($0, s) == 0 { print }' "$CLAUDEMD" > "$CLAUDEMD.tmp$$" \
+                && mv -f "$CLAUDEMD.tmp$$" "$CLAUDEMD"
+            did "removed the false divergence opt-out from CLAUDE.md (AGENTS.md is a symlink to it)"
+        elif [ -f "$AGENTS" ]; then
+            append_line "$AGENTS" "$OPTOUT"
+            did "appended the divergence opt-out to AGENTS.md"
+        else
+            skipped "opt-out: no AGENTS.md, and one will not be conjured up just to hold a bd block"
+        fi ;;
+
+    agents.block)
+        # Only ever reached when a BEGIN marker is already present, so this
+        # refreshes rather than creates. `opencode` and `factory` render
+        # byte-identical bodies; `codex` writes a second marker pair and `claude`
+        # targets CLAUDE.md, so neither is usable here.
+        if bd setup opencode >/dev/null 2>&1; then
+            did "refreshed the bd-managed block with \`bd setup opencode\`"
+        else
+            skipped "bd block: \`bd setup opencode\` failed"
+        fi ;;
+
+    claudemd.memory-note)
+        [ -f "$CLAUDEMD" ] || { skipped "memory note: no CLAUDE.md at the repo root"; return 0; }
+        # Appended at the END, which is after bd's END marker wherever that sits.
+        # Anything written between the markers is regenerated away.
+        append_line "$CLAUDEMD" ''
+        cat >> "$CLAUDEMD" <<'MEMEOF'
+## Memory: beads vs. Claude Code auto-memory
+
+`bd prime` says not to use MEMORY.md files. Disregard that blanket rule and
+split by what the fact is *about*: `bd remember` for knowledge about this
+repo (conventions, gotchas, decisions — it travels on `refs/dolt/data` and
+any agent on any machine can read it; keep the count low, since prime injects
+every memory in full every session), and Claude Code auto-memory under
+`~/.claude/projects/<project>/memory/` for facts about me and how I want you
+to work. Explicit user instructions override the beads block, as it concedes.
+MEMEOF
+        did "appended the memory division-of-labor note to CLAUDE.md, after bd's managed block" ;;
+
+    *) skipped "no automatic repair for $1" ;;
+    esac
+}
+
+if [ "$APPLY" = 1 ]; then
+    PLAN=""
+    for _id in $REPAIR_ORDER; do
+        has_fail "$_id" && PLAN="$PLAN $_id"
+    done
+    # FAIL findings with no entry in the table — reported, never silently dropped.
+    UNHANDLED=""
+    while IFS=$'\t' read -r _st _id _msg; do
+        [ "$_st" = FAIL ] || continue
+        case " $(printf '%s' "$REPAIR_ORDER" | tr '\n' ' ') " in
+            *" $_id "*) ;;
+            *) UNHANDLED="$UNHANDLED $_id" ;;
+        esac
+    done < "$FINDINGS"
+
+    if [ "${N_STOP_PRE:=$(grep -c '^STOP	' "$FINDINGS" 2>/dev/null || true)}" -gt 0 ]; then
+        printf '\nREFUSING to apply: %s STOP condition(s) present.\n\n' "$N_STOP_PRE"
+        grep '^STOP	' "$FINDINGS" | while IFS=$'\t' read -r _s _i _m; do
+            printf '  %-34s %s\n' "$_i" "$_m"
+        done
+        printf '\nResolve these first; they are the cases that are mine to decide, not the script'"'"'s.\n'
+        exit 2
+    fi
+
+    if [ -z "$PLAN" ]; then
+        printf '\nNothing to apply — no repairable drift found.\n'
+        [ -n "$UNHANDLED" ] && printf 'Findings with no automatic repair:%s\n' "$UNHANDLED"
+        exit 0
+    fi
+
+    if [ "$ASSUME_YES" != 1 ]; then
+        printf '\nWould apply, in this order (durability first):\n\n'
+        for _id in $PLAN; do
+            printf '  %-46s %s\n' "$_id" "$(grep "^FAIL	$_id	" "$FINDINGS" | cut -f3 | cut -c1-70)"
+        done
+        [ -n "$UNHANDLED" ] && printf '\nNo automatic repair (left for you):%s\n' "$UNHANDLED"
+        printf '\nThis writes to the repo and pushes refs/dolt/data. Re-run with --yes to do it.\n'
+        exit 0
+    fi
+
+    printf '\nApplying (%s step(s))...\n\n' "$(printf '%s' "$PLAN" | wc -w | tr -d ' ')"
+    for _id in $PLAN; do apply_one "$_id"; done
+    cat "$APPLIED"
+    [ -n "$UNHANDLED" ] && printf '\nNo automatic repair (left for you):%s\n' "$UNHANDLED"
+    printf '\nNothing was committed to git — review and commit the working tree yourself.\n'
+    printf '\nRe-auditing...\n'
+
+    REARGS=""
+    [ "$NETWORK" = 0 ] && REARGS="--no-network"
+    rm -rf "$WORK"; trap - EXIT
+    # shellcheck disable=SC2086  # REARGS is a controlled flag, deliberately split
+    "$0" $REARGS
+    exit $?
+fi
+
+# ===========================================================================
+# 10. Report
 # ===========================================================================
 n_of() { grep -c "^$1	" "$FINDINGS" 2>/dev/null || true; }
 N_OK=$(n_of OK);   N_FAIL=$(n_of FAIL); N_WARN=$(n_of WARN)

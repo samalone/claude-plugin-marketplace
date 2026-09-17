@@ -118,13 +118,23 @@ Additions to the **public** beads plugin (`beads@beads-marketplace`), not a repl
 - `backup.git-push` off; `dolt.auto-commit` left at bd's default
 - schema matched to the installed `bd`, and mode-appropriate health checks
 
-The checks are performed by `scripts/config-audit.sh`, which is **strictly
-read-only** — it never runs `bd config set`, touches `.beads/`, stages, commits,
-or starts a server — so it is safe to sweep across every project before deciding
-anything. `--json` emits the findings machine-readably and `--no-network` skips
-the `ls-remote` probe. Exit codes: 0 clean, 1 drift, 2 a condition needing your
-decision (a pre-Dolt layout, a real pending migration), 3 script error. The skill
-keeps the rationale for each check and the repairs, which stay manual for now.
+The checks are performed by `scripts/config-audit.sh`. Without `--apply` it is
+**strictly read-only** — it never runs `bd config set`, touches `.beads/`,
+stages, commits, or starts a server — so it is safe to sweep across every project
+before deciding anything. `--json` emits the findings machine-readably and
+`--no-network` skips the `ls-remote` probe. Exit codes: 0 clean, 1 drift, 2 a
+condition needing your decision (a pre-Dolt layout, a real pending migration),
+3 script error.
+
+`--apply` prints a repair plan and changes nothing; `--apply --yes` performs the
+repairs and re-audits. It acts only on `FAIL` findings, only when no `STOP` is
+present, and never on a `WARN` — those are the judgement calls. The order is a
+safety property rather than a convenience: the remote must exist, be on HTTPS,
+and have taken a real push before anything deletes `issues.jsonl`, and that step
+re-runs its own `ls-remote` instead of trusting an earlier repair in the same run,
+because it is the one step that destroys data. It makes no git commit — the
+working tree is left for review — but it does push `refs/dolt/data`, since that
+is what establishes the durability the ordering depends on.
 
 It needs **mikefarah/yq v4** alongside `bd`, `git` and `jq`, and refuses to run
 against kislyuk/yq — the unrelated Python tool of the same name that `apt install
