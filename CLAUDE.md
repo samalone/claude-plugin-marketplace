@@ -104,8 +104,18 @@ base with `BD_TESTS_TMPDIR`) and never touches a live repo. Locally:
 brew install bats-core shellcheck jq yq       # bd must already be installed (see gates below)
 claude plugin validate .
 shellcheck plugins/*/scripts/*.sh && shellcheck -x test/helpers/setup.bash
-bats test/                                    # ~3 min
+bats test/                                    # ~9 min (see note below)
 ```
+
+**The suite is slow, and the cost is per-test by design.** 41 of the 46 tests
+call `make_project`, which runs a real `bd init` with a Dolt database, and six
+use `--ready`, which also pushes to a bare origin. Measured at ~9 minutes on
+2026-09-18 (macOS, with 18 unrelated project Dolt servers running); it was ~3
+minutes when the suite was change-mode only. CI's `timeout-minutes: 40` still has
+headroom, but less than it used to. If it needs to come down, the lever is
+sharing one fixture across the read-only `config-audit` checks rather than
+rebuilding per test — bats' per-test `setup()` makes that awkward, which is why
+it is not done yet.
 
 Two traps the fixtures hit, worth knowing before editing them:
 
