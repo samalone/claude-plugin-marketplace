@@ -75,7 +75,9 @@
 #   and want an opt-out comment whose text is false. Verified against entwine
 #   and legible, which report mode 120000 and share a blob hash.
 # * Paths reported by bd are native, so they go through cygpath -u when it
-#   exists before any test or comparison.
+#   exists before any test or comparison — and so does `git rev-parse
+#   --show-toplevel`, which reports `C:/Users/...` on Windows. Mixing the two
+#   spellings silently defeats relp(), whose prefix strip then matches nothing.
 # * Never pipe a bd/git command into `grep -q`/`head`/`awk ... exit`: the early
 #   close SIGPIPEs the producer and, under pipefail, inverts the result. Every
 #   probe below captures first and matches against a here-string.
@@ -222,6 +224,17 @@ BEADS_DIR=$(posixpath "$BEADS_DIR")
 
 REPO_ROOT=$(git -C "$BEADS_DIR" rev-parse --show-toplevel 2>/dev/null) \
     || die "the beads dir is not inside a git repository"
+# Through cygpath as well. git reports a NATIVE root on Windows (`C:/Users/...`,
+# forward slashes but drive-lettered) while every bd-derived path above has
+# already been posixpath'd to `/c/Users/...`, so without this relp() strips
+# nothing and every "repo-relative" path comes out absolute. Read-only that is
+# merely cosmetic — MSYS converts the absolute path back for git, so is_tracked
+# and is_ignored still answer correctly — but under --apply the issues.jsonl and
+# interactions.jsonl repairs append $rel to .gitignore, and an absolute pattern
+# is a DEAD one: the leading slash anchors it to the repo root, so git looks for
+# `c/Users/...`, the finding never clears, and each re-run appends another line.
+# cygpath -u is idempotent, so a path that is already POSIX passes through.
+REPO_ROOT=$(posixpath "$REPO_ROOT")
 
 CFG="$BEADS_DIR/config.yaml"
 META="$BEADS_DIR/metadata.json"
