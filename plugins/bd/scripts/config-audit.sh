@@ -78,6 +78,9 @@
 #   exists before any test or comparison — and so does `git rev-parse
 #   --show-toplevel`, which reports `C:/Users/...` on Windows. Mixing the two
 #   spellings silently defeats relp(), whose prefix strip then matches nothing.
+# * MSYS2 grep opens files in TEXT mode and strips CRLF before matching, so it
+#   cannot be used to detect CR bytes on the one platform where they turn up.
+#   `tr -dc '\r'` reads binary everywhere; see the line-endings check.
 # * Never pipe a bd/git command into `grep -q`/`head`/`awk ... exit`: the early
 #   close SIGPIPEs the producer and, under pipefail, inverts the result. Every
 #   probe below captures first and matches against a here-string.
@@ -374,7 +377,16 @@ esac
 # touches as LF while passing comment lines through with their CRs, leaving a
 # mixed-ending file. Normalizing once, up front, is an --apply action; here we
 # only report it.
-if [ -f "$CFG" ] && LC_ALL=C grep -q $'\r' "$CFG" 2>/dev/null; then
+#
+# NOT `grep -q $'\r'`. MSYS2 grep (GNU grep 3.0, Git Bash) opens files in TEXT
+# mode and strips CRLF before matching, so that test never fires on Windows —
+# the one platform this check exists for. Measured on a real CRLF config.yaml:
+# `grep -c` 0, `grep -cU` 69, same one-byte pattern. `tr -dc` keeps only the CR
+# bytes and is read as binary on every platform. Deliberately a command
+# substitution rather than a pipe into `cmp -s`/`head`: cmp stops at the first
+# difference, and that early close SIGPIPEs the producer and inverts the result
+# under pipefail — the same trap documented at the top of this file.
+if [ -f "$CFG" ] && [ -n "$(LC_ALL=C tr -dc '\r' < "$CFG" 2>/dev/null)" ]; then
     f_fail "config.line-endings" "config.yaml contains CR bytes. Normalize to LF before editing, or a yq write leaves the file with mixed endings (data lines LF, comments CRLF)."
 else
     [ -f "$CFG" ] && f_ok "config.line-endings" "LF"
