@@ -1,0 +1,581 @@
+#!/usr/bin/env bats
+#
+# config-audit: the read-only audit's detection logic.
+#
+# These tests are about what the audit SEES, not what it changes — the script
+# writes nothing, so every case here is safe to assert against a live fixture.
+# The cases that earn their keep are the ones where the obvious implementation
+# is wrong: grep-based key detection, `[ -L ]` symlink detection, and yq's `//`
+# collapsing false into absent.
+
+load helpers/setup
+
+setup() {
+    require_tools yq
+}
+
+teardown() {
+    bdt_teardown
+}
+
+# audit [args...] — run the audit in the fixture, no network probe.
+audit() {
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network $*"
+}
+
+# finding <id> — the reported line for one check id (empty if not reported).
+finding() { printf '%s\n' "$output" | grep -E "^\[[A-Z ]+\] +$1 " || true; }
+
+# status_of <id> — just the status word for one check id.
+status_of() {
+    printf '%s\n' "$output" \
+        | sed -n "s/^\[\([A-Z]*\) *\] *$1 .*/\1/p" | head -1
+}
+
+# --- key presence: the case the old grep recipe got wrong --------------------
+
+@test "config-audit: sees a live flat key, not bd's commented-out example" {
+    make_project
+    # bd's stock config.yaml carries `#   git-push: false` as commented
+    # documentation. The skill's old recipe, grep -nE '(^|[[:space:]])git-push:',
+    # matches THAT line and misses a live `backup.git-push:` (whose leaf is
+    # preceded by '.'), so it inspected comments and scored them as the setting.
+    grep -qE '^#.*git-push:' "$PROJECT/.beads/config.yaml"   # the decoy is present
+
+    append_config_line 'backup.git-push: false'
+    audit
+    [ "$(status_of 'config.backup.git-push')" = "OK" ]
+
+    # And with only the decoy, the key must read as ABSENT rather than as set.
+    grep -v '^backup\.git-push:' "$PROJECT/.beads/config.yaml" > "$PROJECT/.beads/c.tmp"
+    mv -f "$PROJECT/.beads/c.tmp" "$PROJECT/.beads/config.yaml"
+    audit
+    [ "$(status_of 'config.backup.git-push')" = "FAIL" ]
+    [[ "$(finding 'config.backup.git-push')" == *"not set"* ]]
+}
+
+@test "config-audit: distinguishes absent from false (yq // would not)" {
+    make_project
+    # `."export.auto" // "default"` returns "default" for a key that is present
+    # and set to false, because // treats false as empty. The whole "an unset key
+    # is an inherited answer, not a stated one" rule depends on telling these
+    # apart, so presence must come from has().
+    audit
+    [ "$(status_of 'config.export.auto')" = "FAIL" ]
+    [[ "$(finding 'config.export.auto')" == *"not set"* ]]
+
+    append_config_line 'export.auto: false'
+    audit
+    [ "$(status_of 'config.export.auto')" = "OK" ]
+    [[ "$(finding 'config.export.auto')" == *"false"* ]]
+}
+
+@test "config-audit: flags a wrong value distinctly from an absent one" {
+    make_project
+    append_config_line 'export.auto: true'
+    audit
+    [ "$(status_of 'config.export.auto')" = "FAIL" ]
+    [[ "$(finding 'config.export.auto')" == *"want false"* ]]
+    [[ "$(finding 'config.export.auto')" != *"not set"* ]]
+}
+
+# --- the flat/nested ambiguity ----------------------------------------------
+
+@test "config-audit: detects a key present as BOTH flat and nested" {
+    make_project
+    # bd writes a setting either as a flat dotted key or as a child of a nested
+    # block depending on what is already in the file, and can leave both at
+    # conflicting values. `bd config get` returns only the flat one and looks
+    # fine. To YAML these are different keys, so has() on each is exact.
+    append_config_line 'dolt.auto-push: false'
+    append_config_line 'dolt:'
+    printf '    auto-push: true\n' >> "$PROJECT/.beads/config.yaml"
+
+    audit
+    [ "$(status_of 'config.dolt.auto-push')" = "FAIL" ]
+    [[ "$(finding 'config.dolt.auto-push')" == *"AMBIGUOUS"* ]]
+}
+
+@test "config-audit: a nested-only key is read, not reported missing" {
+    make_project
+    # A project lands in the nested-only form by following the audit's own
+    # SSH->HTTPS remote repair: `bd dolt remote remove` comments the flat line
+    # out, so bd's next write has no flat line to reuse.
+    append_config_line 'dolt:'
+    printf '    auto-push: false\n' >> "$PROJECT/.beads/config.yaml"
+
+    audit
+    [ "$(status_of 'config.dolt.auto-push')" = "OK" ]
+    [[ "$(finding 'config.dolt.auto-push')" == *"nested"* ]]
+}
+
+# --- AGENTS.md symlink detection --------------------------------------------
+
+@test "config-audit: detects a symlinked AGENTS.md the way Windows requires" {
+    make_project
+    printf '# Project\n' > "$PROJECT/CLAUDE.md"
+    rm -f "$PROJECT/AGENTS.md"          # bd init writes its own
+    ln -s CLAUDE.md "$PROJECT/AGENTS.md"
+    git -C "$PROJECT" add CLAUDE.md AGENTS.md
+    [ "$(git -C "$PROJECT" ls-files -s AGENTS.md | awk '{print $1}')" = 120000 ]
+
+    audit
+    [[ "$(finding 'agents.kind')" == *"symlink"* ]]
+    # Nothing to opt out of when there is only one file.
+    [ "$(status_of 'agents.optout')" = "OK" ]
+}
+
+@test "config-audit: symlink check survives a checkout without core.symlinks" {
+    make_project
+    printf '# Project\n' > "$PROJECT/CLAUDE.md"
+    rm -f "$PROJECT/AGENTS.md"          # bd init writes its own
+    ln -s CLAUDE.md "$PROJECT/AGENTS.md"
+    git -C "$PROJECT" add CLAUDE.md AGENTS.md
+
+    # Reproduce what Windows produces without core.symlinks=true: the index still
+    # records mode 120000, but the working tree holds a REGULAR FILE whose
+    # contents are the target path. `[ -L ]` is false here; `git ls-files -s` is
+    # not. Without this, the audit takes the "two independent files" branch and
+    # calls for an opt-out comment whose own text is a lie.
+    rm "$PROJECT/AGENTS.md"
+    printf 'CLAUDE.md' > "$PROJECT/AGENTS.md"
+    [ ! -L "$PROJECT/AGENTS.md" ]
+    [ "$(git -C "$PROJECT" ls-files -s AGENTS.md | awk '{print $1}')" = 120000 ]
+
+    audit
+    [[ "$(finding 'agents.kind')" == *"symlink"* ]]
+}
+
+@test "config-audit: flags the false opt-out comment on a symlinked pair" {
+    make_project
+    # The mistake the skill records making twice before it added the check: the
+    # comment says "this file is bd's generated primer, CLAUDE.md is hand-
+    # written", which is false when they are one file.
+    printf '# Project\n\n<!-- bd-doctor-divergence: ok -->\n' > "$PROJECT/CLAUDE.md"
+    rm -f "$PROJECT/AGENTS.md"          # bd init writes its own
+    ln -s CLAUDE.md "$PROJECT/AGENTS.md"
+    git -C "$PROJECT" add CLAUDE.md AGENTS.md
+
+    audit
+    [ "$(status_of 'agents.optout')" = "FAIL" ]
+    [[ "$(finding 'agents.optout')" == *"only one file"* ]]
+}
+
+@test "config-audit: wants the opt-out on a genuine pair of files" {
+    make_project
+    printf '# Project\n' > "$PROJECT/CLAUDE.md"
+    printf '# Agents\n' > "$PROJECT/AGENTS.md"
+    git -C "$PROJECT" add CLAUDE.md AGENTS.md
+
+    audit
+    [[ "$(finding 'agents.kind')" == *"independent"* ]]
+    [ "$(status_of 'agents.optout')" = "FAIL" ]
+}
+
+# --- pre-marker residue ------------------------------------------------------
+
+@test "config-audit: reports retracted guidance above the BEGIN marker" {
+    make_project
+    printf '# Project\n' > "$PROJECT/CLAUDE.md"
+    # Regeneration rebuilds content[:begin] + fresh section + content[end:], so
+    # everything above BEGIN survives verbatim and a refresh never reaches it.
+    cat > "$PROJECT/AGENTS.md" <<'EOF'
+# Agents
+
+**MANDATORY WORKFLOW:**
+   git pull --rebase
+
+<!-- BEGIN BEADS INTEGRATION v:3 profile:full hash:abc -->
+managed
+<!-- END BEADS INTEGRATION -->
+<!-- bd-doctor-divergence: ok -->
+EOF
+    git -C "$PROJECT" add CLAUDE.md AGENTS.md
+
+    audit
+    [ "$(status_of 'agents.residue')" = "WARN" ]
+    [[ "$(finding 'agents.residue')" == *"rebase"* ]]
+    [[ "$(finding 'agents.residue')" == *"3:"* ]]   # reported with line numbers
+}
+
+@test "config-audit: a bare BEGIN marker is flagged as the pre-versioned format" {
+    make_project
+    printf '# Project\n' > "$PROJECT/CLAUDE.md"
+    cat > "$PROJECT/AGENTS.md" <<'EOF'
+<!-- BEGIN BEADS INTEGRATION -->
+managed
+<!-- END BEADS INTEGRATION -->
+<!-- bd-doctor-divergence: ok -->
+EOF
+    git -C "$PROJECT" add CLAUDE.md AGENTS.md
+
+    audit
+    [ "$(status_of 'agents.block')" = "FAIL" ]
+    [[ "$(finding 'agents.block')" == *"pre-versioned"* ]]
+}
+
+# --- the memory note ---------------------------------------------------------
+
+@test "config-audit: wants the memory note outside bd's managed block" {
+    make_project
+    cat > "$PROJECT/CLAUDE.md" <<'EOF'
+# Project
+<!-- BEGIN BEADS INTEGRATION v:3 profile:full hash:abc -->
+## Memory: beads vs. Claude Code auto-memory
+inside the block, so it is regenerated away
+<!-- END BEADS INTEGRATION -->
+EOF
+    git -C "$PROJECT" add CLAUDE.md
+    audit
+    [ "$(status_of 'claudemd.memory-note')" = "FAIL" ]
+    [[ "$(finding 'claudemd.memory-note')" == *"INSIDE"* ]]
+
+    cat > "$PROJECT/CLAUDE.md" <<'EOF'
+# Project
+<!-- BEGIN BEADS INTEGRATION v:3 profile:full hash:abc -->
+managed
+<!-- END BEADS INTEGRATION -->
+
+## Memory: beads vs. Claude Code auto-memory
+outside, where it survives
+EOF
+    audit
+    [ "$(status_of 'claudemd.memory-note')" = "OK" ]
+}
+
+# --- line endings ------------------------------------------------------------
+
+@test "config-audit: reports CRLF in config.yaml" {
+    make_project
+    audit
+    [ "$(status_of 'config.line-endings')" = "OK" ]
+
+    # yq parses a CRLF file correctly and does not leave \r inside values, but it
+    # rewrites the lines it touches as LF while passing comments through with
+    # their CRs — leaving a mixed-ending file. Normalize before editing.
+    sed 's/$/\r/' "$PROJECT/.beads/config.yaml" > "$PROJECT/.beads/c.tmp"
+    mv -f "$PROJECT/.beads/c.tmp" "$PROJECT/.beads/config.yaml"
+    audit
+    [ "$(status_of 'config.line-endings')" = "FAIL" ]
+}
+
+# --- guards ------------------------------------------------------------------
+
+@test "config-audit: refuses a yq that is not mikefarah/yq" {
+    make_project
+    # `apt install yq` gives kislyuk/yq, a Python jq wrapper with an entirely
+    # different CLI. It must fail loudly rather than silently misparse.
+    local fake; fake="$(mktemp -d "$BD_TESTS_BASE/bdt-fakebin.XXXXXX")"
+    printf '#!/bin/sh\necho "yq 3.4.3"\n' > "$fake/yq"
+    chmod +x "$fake/yq"
+
+    run bash -c "cd '$PROJECT' && PATH='$fake:$PATH' '$CONFIG_AUDIT' --no-network"
+    safe_rm "$fake"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"mikefarah"* ]]
+}
+
+@test "config-audit: refuses to run outside a beads project" {
+    local bare; bare="$(mktemp -d "$BD_TESTS_BASE/bdt-nobeads.XXXXXX")"
+    git init -q "$bare"
+    run bash -c "cd '$bare' && '$CONFIG_AUDIT' --no-network"
+    safe_rm "$bare"
+    [ "$status" -eq 3 ]
+}
+
+@test "config-audit: rejects an unknown argument rather than ignoring it" {
+    make_project
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --appply"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"unknown argument"* ]]
+}
+
+# --- contract ----------------------------------------------------------------
+
+@test "config-audit: changes nothing (read-only contract)" {
+    make_project --ready
+    local before_cfg before_meta before_git
+    before_cfg="$(cksum < "$PROJECT/.beads/config.yaml")"
+    before_meta="$(cksum < "$PROJECT/.beads/metadata.json")"
+    before_git="$(git -C "$PROJECT" status --short)"
+
+    audit
+    [ "$status" -le 2 ]                       # a report, not a crash
+    [ "$(cksum < "$PROJECT/.beads/config.yaml")" = "$before_cfg" ]
+    [ "$(cksum < "$PROJECT/.beads/metadata.json")" = "$before_meta" ]
+    [ "$(git -C "$PROJECT" status --short)" = "$before_git" ]
+    [[ "$output" == *"Read-only: nothing was changed."* ]]
+}
+
+@test "config-audit: --json emits parseable findings with a summary" {
+    make_project
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network --json"
+    [ "$status" -le 2 ]
+    printf '%s' "$output" | jq -e '.findings | length > 0' >/dev/null
+    printf '%s' "$output" | jq -e '.summary | type == "object"' >/dev/null
+    printf '%s' "$output" | jq -e '.project | length > 0' >/dev/null
+    # every finding carries the three fields the report renders
+    printf '%s' "$output" | jq -e 'all(.findings[]; has("status") and has("id") and has("message"))' >/dev/null
+}
+
+@test "config-audit: exit code reflects the worst finding" {
+    make_project
+    # A bare fixture has drift (export.auto and backup.git-push unset), no STOP.
+    audit
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"STOP conditions present"* ]]
+}
+
+# =============================================================================
+# --apply
+# =============================================================================
+
+# apply [args...] — run the repair pass in the fixture.
+apply() { run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network --apply $*"; }
+
+@test "config-audit: --apply without --yes prints a plan and changes nothing" {
+    make_project
+    local cfg git_state
+    cfg="$(cksum < "$PROJECT/.beads/config.yaml")"
+    git_state="$(git -C "$PROJECT" status --short)"
+
+    apply
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Would apply"* ]]
+    [[ "$output" == *"Re-run with --yes"* ]]
+    [ "$(cksum < "$PROJECT/.beads/config.yaml")" = "$cfg" ]
+    [ "$(git -C "$PROJECT" status --short)" = "$git_state" ]
+}
+
+@test "config-audit: --apply --yes sets the config keys and re-audits clean" {
+    make_project
+    apply --yes
+    [[ "$output" == *"set export.auto=false"* ]]
+    [[ "$output" == *"set dolt.auto-push=false"* ]]
+    [[ "$output" == *"set backup.git-push=false"* ]]
+
+    # The trailing report is a fresh audit, so these must now read OK.
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network"
+    [ "$(status_of 'config.export.auto')" = "OK" ]
+    [ "$(status_of 'config.dolt.auto-push')" = "OK" ]
+    [ "$(status_of 'config.backup.git-push')" = "OK" ]
+}
+
+@test "config-audit: --apply --yes collapses the flat/nested ambiguity" {
+    make_project
+    append_config_line 'dolt.auto-push: false'
+    append_config_line 'dolt:'
+    printf '    auto-push: true\n' >> "$PROJECT/.beads/config.yaml"
+
+    apply --yes
+    [ "$(grep -c 'auto-push' "$PROJECT/.beads/config.yaml")" -eq 1 ]
+    [ "$(grep -cE '^dolt\.auto-push: false$' "$PROJECT/.beads/config.yaml")" -eq 1 ]
+}
+
+@test "config-audit: --apply refuses outright when a STOP is present" {
+    make_project
+    local cfg; cfg="$(cksum < "$PROJECT/.beads/config.yaml")"
+    # A tracked machine credential is a STOP. (Corrupting metadata.json would
+    # not do: it breaks `bd context`, so the script dies at exit 3 long before
+    # the STOP logic — a worse failure, but not the one under test.)
+    printf 'secret\n' > "$PROJECT/.beads-credential-key"
+    git -C "$PROJECT" add -f .beads-credential-key
+
+    apply --yes
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"REFUSING to apply"* ]]
+    [ "$(cksum < "$PROJECT/.beads/config.yaml")" = "$cfg" ]   # nothing touched
+}
+
+@test "config-audit: --apply will not delete issues.jsonl without an off-machine copy" {
+    make_project
+    # No `bd dolt push` has happened here, so origin has no refs/dolt/data. The
+    # file is not a backup, but it can be the only off-machine copy that exists,
+    # so the deletion step re-checks durability itself rather than trusting that
+    # an earlier repair in the same run succeeded.
+    printf '{"id":"x-1"}\n' > "$PROJECT/.beads/issues.jsonl"
+    git -C "$PROJECT" add -f .beads/issues.jsonl
+    git -C "$PROJECT" -c user.name=t -c user.email=t@e.invalid commit -qm "seed"
+
+    # --no-network so no push repair runs. The guard does its OWN ls-remote
+    # regardless of that flag: declining to delete on the strength of a check
+    # that was skipped would be the worst possible reading of it.
+    apply --yes
+    [[ "$output" == *"NOT removing it"* ]]
+    [ -f "$PROJECT/.beads/issues.jsonl" ]
+    git -C "$PROJECT" ls-files --error-unmatch .beads/issues.jsonl >/dev/null
+}
+
+@test "config-audit: --apply removes issues.jsonl once refs/dolt/data exists" {
+    make_project --ready                      # --ready pushes refs/dolt/data
+    printf '{"id":"x-1"}\n' > "$PROJECT/.beads/issues.jsonl"
+    git -C "$PROJECT" add -f .beads/issues.jsonl
+    git -C "$PROJECT" -c user.name=t -c user.email=t@e.invalid commit -qm "seed"
+
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --apply --yes"
+    [ ! -f "$PROJECT/.beads/issues.jsonl" ]
+    run git -C "$PROJECT" ls-files --error-unmatch .beads/issues.jsonl
+    [ "$status" -ne 0 ]
+    grep -qxF '.beads/issues.jsonl' "$PROJECT/.gitignore"
+}
+
+@test "config-audit: --apply untracks interactions.jsonl but KEEPS the file" {
+    make_project --ready
+    # An append-only audit trail that survives Dolt GC/flatten — a real recovery
+    # path, not a redundant snapshot. Untrack it; never delete it.
+    printf '{"event":"x"}\n' > "$PROJECT/.beads/interactions.jsonl"
+    git -C "$PROJECT" add -f .beads/interactions.jsonl
+    git -C "$PROJECT" -c user.name=t -c user.email=t@e.invalid commit -qm "seed"
+
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --apply --yes"
+    [ -f "$PROJECT/.beads/interactions.jsonl" ]               # kept
+    run git -C "$PROJECT" ls-files --error-unmatch .beads/interactions.jsonl
+    [ "$status" -ne 0 ]                                       # but untracked
+}
+
+@test "config-audit: --apply removes the false opt-out on a symlinked pair" {
+    make_project
+    printf '# Project\n\n<!-- bd-doctor-divergence: ok -->\n' > "$PROJECT/CLAUDE.md"
+    rm -f "$PROJECT/AGENTS.md"
+    ln -s CLAUDE.md "$PROJECT/AGENTS.md"
+    git -C "$PROJECT" add CLAUDE.md AGENTS.md
+
+    apply --yes
+    ! grep -q 'bd-doctor-divergence' "$PROJECT/CLAUDE.md"
+    [ -L "$PROJECT/AGENTS.md" ]                               # link itself untouched
+}
+
+@test "config-audit: --apply never makes a git commit" {
+    make_project --ready
+    local head; head="$(git -C "$PROJECT" rev-parse HEAD)"
+    apply --yes
+    [ "$(git -C "$PROJECT" rev-parse HEAD)" = "$head" ]
+    [[ "$output" == *"Nothing was committed to git"* ]]
+}
+
+@test "config-audit: --apply appends to a gitignore with no trailing newline" {
+    make_project --ready
+    # bd writes these files with no trailing byte, so a naive >> lands on the end
+    # of the last line and silently corrupts it.
+    printf 'existing-pattern' > "$PROJECT/.gitignore"        # deliberately unterminated
+    apply --yes
+    grep -qxF 'existing-pattern' "$PROJECT/.gitignore"
+    grep -qxF '.beads/interactions.jsonl' "$PROJECT/.gitignore"
+}
+
+@test "config-audit: --json cannot be combined with --apply" {
+    make_project
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --json --apply"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"reporting mode"* ]]
+}
+
+# =============================================================================
+# regressions found by review
+# =============================================================================
+
+@test "config-audit: to_https handles every remote shape without corrupting it" {
+    # A code review caught the port case; the first fix for it then ate a path
+    # segment from the scp-style case. Both directions are covered here because
+    # the two shapes are only distinguishable by what follows the ':'.
+    # shellcheck disable=SC1090
+    . <(sed -n '/^to_https() {/,/^}/p' "$CONFIG_AUDIT")
+
+    [ "$(to_https 'git@github.com:me/repo.git')"        = 'https://github.com/me/repo.git' ]
+    [ "$(to_https 'ssh://git@host:2222/me/repo.git')"   = 'https://host/me/repo.git' ]
+    [ "$(to_https 'ssh://git@github.com/me/repo.git')"  = 'https://github.com/me/repo.git' ]
+    [ "$(to_https 'https://github.com/me/repo.git')"    = 'https://github.com/me/repo.git' ]
+    # the git+ prefix is carried through, never invented and never dropped
+    [ "$(to_https 'git+ssh://git@github.com/me/repo.git')"   = 'git+https://github.com/me/repo.git' ]
+    [ "$(to_https 'git+https://github.com/me/repo.git')"     = 'git+https://github.com/me/repo.git' ]
+}
+
+@test "config-audit: the SSH->HTTPS swap never leaves the project remote-less" {
+    make_project
+    # bd 1.3.0 REFUSES a Dolt remote whose URL matches the git origin unless
+    # --allow-git-origin is passed — and a Dolt remote that IS the git origin is
+    # exactly the target state here. Without the flag, remove-then-add left the
+    # project with no remote at all: the only off-machine copy of the beads data,
+    # severed by the script that exists to protect it.
+    bd -C "$PROJECT" dolt remote remove origin >/dev/null 2>&1 || true
+    bd -C "$PROJECT" dolt remote add origin 'git+ssh://git@example.com/me/repo.git' >/dev/null 2>&1
+
+    apply --yes
+    run bash -c "cd '$PROJECT' && bd dolt remote list"
+    [[ "$output" != *"No remotes"* ]]
+    [[ "$output" != *"ssh"* ]]
+    [[ "$output" == *"https://example.com/me/repo.git"* ]]
+}
+
+@test "config-audit: gitignores issues.jsonl even with no off-machine copy" {
+    make_project
+    # "absent but not gitignored" is the commonest form of this finding: there is
+    # nothing to delete, only a pattern to add. Gating that on refs/dolt/data —
+    # which guards the DELETION — made it permanently unfixable.
+    rm -f "$PROJECT/.beads/issues.jsonl"
+    run bash -c "cd '$PROJECT' && git -C '$PROJECT' ls-remote origin refs/dolt/data"
+    [ -z "$output" ]                                   # no off-machine copy
+
+    apply --yes
+    run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network"
+    [ "$(status_of 'files.issues-jsonl')" = "OK" ]
+}
+
+@test "config-audit: never appends a second copy of the memory note" {
+    make_project
+    printf '# Project\n\n## Memory: beads vs. Claude Code auto-memory\nfirst\n' > "$PROJECT/CLAUDE.md"
+    printf '\n## Memory: beads vs. Claude Code auto-memory\nsecond\n' >> "$PROJECT/CLAUDE.md"
+    git -C "$PROJECT" add CLAUDE.md
+
+    # The check fires for "present N times" as well as for "absent"; appending
+    # unconditionally turned two copies into three, and three into four.
+    apply --yes
+    [ "$(grep -cF '## Memory: beads vs. Claude Code auto-memory' "$PROJECT/CLAUDE.md")" -eq 2 ]
+}
+
+@test "config-audit: commits the Dolt working set its own config writes dirty" {
+    make_project --ready
+    # This cannot be a plan entry: a plan entry is keyed on the PRE-repair audit,
+    # so on an otherwise-clean project the suppress-key writes were left
+    # uncommitted — the dirty state that blocks migrations.
+    apply --yes
+    [[ "$output" == *"set doctor.suppress.cursor-integration=true"* ]]
+    [[ "$output" == *"committed the Dolt working set"* ]]
+}
+
+# =============================================================================
+# bd version gate (a minimum, not a range)
+# =============================================================================
+
+@test "config-audit: ver_lt orders versions correctly" {
+    # shellcheck disable=SC1090
+    . <(sed -n '/^ver_lt() {/,/^}/p' "$CONFIG_AUDIT")
+
+    ver_lt 1.2.9 1.3.0                       # older major.minor
+    ver_lt 1.2   1.3.0                       # short form
+    ver_lt 0.9.9 1.3.0
+    ! ver_lt 1.3.0 1.3.0                     # equal is not less
+    ! ver_lt 1.3.1 1.3.0
+    ! ver_lt 1.4.0 1.3.0
+    ! ver_lt 1.10.0 1.3.0                    # numeric, not lexical: 10 > 3
+    ! ver_lt 2.0.0 1.3.0
+    ! ver_lt 1.3 1.3.0                       # missing field reads as 0
+}
+
+@test "config-audit: --check-version needs no project and reports the gate" {
+    local bare; bare="$(mktemp -d "$BD_TESTS_BASE/bdt-nowhere.XXXXXX")"
+    run bash -c "cd '$bare' && '$CONFIG_AUDIT' --check-version"
+    safe_rm "$bare"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"minimum"* ]]
+}
+
+@test "config-audit: BD_MIN is 1.3.0 and the script says so in one place" {
+    # CI asserts the requirement by running --check-version, so this constant is
+    # the single source of truth; a second copy anywhere is drift waiting to
+    # happen (six red commits on 2026-09-17 came from exactly that).
+    [ "$(grep -c '^BD_MIN=' "$CONFIG_AUDIT")" -eq 1 ]
+    grep -qx 'BD_MIN=1.3.0' "$CONFIG_AUDIT"
+    # and no 1.1/1.2 carve-outs survive
+    ! grep -qE '1\.1\.\*|1\.2\.\*' "$CONFIG_AUDIT"
+}
