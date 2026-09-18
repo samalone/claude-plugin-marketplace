@@ -101,7 +101,7 @@ fixtures under `$HOME` (bd refuses `/tmp`-family "unsafe" locations; override th
 base with `BD_TESTS_TMPDIR`) and never touches a live repo. Locally:
 
 ```bash
-brew install bats-core shellcheck jq yq       # bd 1.1.x-1.3.x must already be installed
+brew install bats-core shellcheck jq yq       # bd must already be installed (see gates below)
 claude plugin validate .
 shellcheck plugins/*/scripts/*.sh && shellcheck -x test/helpers/setup.bash
 bats test/                                    # ~3 min
@@ -117,6 +117,12 @@ Two traps the fixtures hit, worth knowing before editing them:
   `prepare_for_switch` in the harness still reimplements only the preconditions
   `change-mode.sh` checks, because the repairs a skill performs can't be invoked
   from a test. Keep it in sync with that script's Phase A.
+- **Two different bd version gates, deliberately.** `config-audit.sh` declares a
+  MINIMUM (`BD_MIN=1.3.0`) and CI asserts it by running the script's own
+  `--check-version`, so there is no duplicated constant to drift. `change-mode.sh`
+  still declares a verified RANGE (1.1.x-1.3.x) and keeps the paired
+  script/workflow gate described above. Don't merge the two schemes without
+  deciding which one each script wants.
 - **`yq` here means mikefarah/yq v4**, the Go binary. `apt install yq` on Debian
   gives kislyuk/yq, a Python jq wrapper with a different CLI; `config-audit.sh`
   gates on the version banner so the wrong one fails loudly. CI installs it from

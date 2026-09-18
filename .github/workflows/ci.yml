@@ -93,10 +93,16 @@ jobs:
       - name: Install bd, bats-core and yq
         run: brew install beads bats-core yq
 
-      # change-mode.sh refuses to run outside the versions its commands and
-      # output-parsing were verified against. Fail loudly here rather than
-      # letting the suite report a confusing switch failure.
-      - name: Assert bd is within the supported range
+      # config-audit.sh asserts a MINIMUM (BD_MIN), and `--check-version` applies
+      # that assertion using the script's own comparator against its own constant
+      # — so there is no second copy of the number to drift. It needs no project.
+      - name: Assert bd satisfies config-audit.sh's minimum
+        run: plugins/bd/scripts/config-audit.sh --check-version
+
+      # change-mode.sh still declares a verified RANGE rather than a floor, so it
+      # keeps the paired gate below. Fail loudly here rather than letting the
+      # suite report a confusing switch failure.
+      - name: Assert bd is within change-mode.sh's supported range
         run: |
           v=$(bd version | awk '{print $3; exit}')
           echo "bd $v"
@@ -108,19 +114,20 @@ jobs:
       # The gate above duplicates the one inside change-mode.sh, and a widened
       # script gate beside a stale workflow gate is exactly how CI stayed red
       # for six commits on 2026-09-17. Fail on the drift itself, not on its
-      # symptom.
-      - name: Assert the bd version gates all agree
+      # symptom. config-audit.sh is deliberately NOT in this loop: it has no
+      # duplicated constant to drift, because --check-version above reads its
+      # BD_MIN out of the script itself.
+      - name: Assert change-mode.sh's gate agrees with this workflow
         run: |
-          for f in plugins/bd/scripts/change-mode.sh plugins/bd/scripts/config-audit.sh; do
-            pat=$(grep -o '1\.1\.\*[^)]*' "$f" | head -1)
-            echo "$f gate: $pat"
-            if [ -z "$pat" ]; then
-              echo "::error::could not read the version gate out of $f"; exit 1
-            fi
-            grep -qF "$pat" .github/workflows/ci.yml || {
-              echo "::error::$f allows '$pat' but this workflow's gate differs — widen both together"; exit 1
-            }
-          done
+          f=plugins/bd/scripts/change-mode.sh
+          pat=$(grep -o '1\.1\.\*[^)]*' "$f" | head -1)
+          echo "$f gate: $pat"
+          if [ -z "$pat" ]; then
+            echo "::error::could not read the version gate out of $f"; exit 1
+          fi
+          grep -qF "$pat" .github/workflows/ci.yml || {
+            echo "::error::$f allows '$pat' but this workflow's gate differs — widen both together"; exit 1
+          }
 
       # Fixtures live under $HOME (bd rejects /tmp-family locations as unsafe);
       # the runner home is bd-safe.

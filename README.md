@@ -136,8 +136,9 @@ because it is the one step that destroys data. It makes no git commit — the
 working tree is left for review — but it does push `refs/dolt/data`, since that
 is what establishes the durability the ordering depends on.
 
-It needs **mikefarah/yq v4** alongside `bd`, `git` and `jq`, and refuses to run
-against kislyuk/yq — the unrelated Python tool of the same name that `apt install
+It needs **bd 1.3.0 or newer** (`--check-version` asserts that on its own, no
+project required) and **mikefarah/yq v4** alongside `git` and `jq`, and refuses
+to run against kislyuk/yq — the unrelated Python tool of the same name that `apt install
 yq` provides. yq is there because grep cannot do this job: on bd's stock
 `config.yaml`, which is ~95% commented-out documentation, a leaf-name grep for
 `git-push:` matches bd's own commented example and *misses* the live

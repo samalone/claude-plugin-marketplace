@@ -9,6 +9,7 @@
 #   config-audit.sh --no-network    skip the `git ls-remote` probe
 #   config-audit.sh --apply         print the repair plan, change nothing
 #   config-audit.sh --apply --yes   perform the repairs, then re-audit
+#   config-audit.sh --check-version verify the installed bd only; no project needed
 #
 # WITHOUT --apply THIS SCRIPT WRITES NOTHING. It does not run `bd config set`,
 # does not touch .beads/, does not stage or commit, and does not start or stop a
@@ -97,12 +98,14 @@ OUT=text
 NETWORK=1
 APPLY=0
 ASSUME_YES=0
+CHECK_VERSION=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --json)       OUT=json ;;
         --no-network) NETWORK=0 ;;
         --apply)      APPLY=1 ;;
         --yes|-y)     ASSUME_YES=1 ;;
+        --check-version) CHECK_VERSION=1 ;;
         -h|--help)
             sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
@@ -129,6 +132,51 @@ case "$_yqv" in
     *\ v4.*) ;;
     *) die "yq v4 required; found: $_yqv" ;;
 esac
+
+# ---------------------------------------------------------------------------
+# bd version gate
+# ---------------------------------------------------------------------------
+# A MINIMUM, not a verified range. Every check here parses bd's output, and bd is
+# a fast-moving tool, so an older binary is refused outright rather than allowed
+# to produce confidently wrong findings. CI reads BD_MIN straight out of this
+# file (`--check-version`), so the workflow's gate cannot drift from the script's.
+BD_MIN=1.3.0
+# The newest release these checks were actually exercised against. Newer is
+# allowed — refusing it would strand the tool on every bd upgrade — but it is
+# reported, because "the parsing still works" is an assumption above this line.
+BD_VERIFIED=1.3.0
+
+# ver_lt <a> <b> — 0 (true) when a < b, comparing dot-separated numeric fields.
+# A non-numeric suffix (1.3.0-rc1) degrades to 0 for that field, which orders a
+# prerelease below its release. Good enough for a floor check.
+ver_lt() {
+    [ "$(awk -v a="$1" -v b="$2" 'BEGIN {
+        na = split(a, A, "."); nb = split(b, B, ".")
+        n = (na > nb) ? na : nb
+        for (i = 1; i <= n; i++) {
+            x = (i <= na) ? A[i] + 0 : 0
+            y = (i <= nb) ? B[i] + 0 : 0
+            if (x < y) { print 1; exit }
+            if (x > y) { print 0; exit }
+        }
+        print 0
+    }')" = 1 ]
+}
+
+_vraw=$(bd version 2>/dev/null) || _vraw=""
+BDVER=$(awk '{print $3; exit}' <<<"$_vraw")
+BDVER=${BDVER%$'\r'}
+BDVER=${BDVER#v}
+[ -n "$BDVER" ] || die "could not read a version out of \`bd version\` (got: ${_vraw:-nothing})"
+ver_lt "$BDVER" "$BD_MIN" && die "bd $BDVER is older than the required $BD_MIN.
+       These checks parse bd's output and assume 1.3.0 behaviour throughout;
+       on an older binary they would report confidently wrong findings.
+       Upgrade bd, or use an earlier revision of this script."
+
+if [ "$CHECK_VERSION" = 1 ]; then
+    printf 'bd %s (minimum %s, verified through %s)\n' "$BDVER" "$BD_MIN" "$BD_VERIFIED"
+    exit 0
+fi
 
 CYGPATH=$(command -v cygpath 2>/dev/null || true)
 
@@ -183,14 +231,12 @@ relp() { printf '%s' "${1#"$REPO_ROOT"/}"; }
 
 PROJECT=$(basename "$REPO_ROOT")
 
-# --- bd version, and the gate -------------------------------------------
-_vraw=$(bd version 2>/dev/null) || _vraw=""
-BDVER=$(awk '{print $3; exit}' <<<"$_vraw")
-BDVER=$(strip_cr "$BDVER")
-case "$BDVER" in
-    1.1.*|1.2.*|1.3.*) f_info "bd.version" "${BDVER}" ;;
-    *) f_stop "bd.version" "${BDVER:-unknown} is outside the verified range (1.1.x-1.3.x). Every check below parses bd's output, so treat these findings as unverified and re-check the commands before letting anything act." ;;
-esac
+# --- bd version (the floor was already enforced above) -------------------
+if ver_lt "$BD_VERIFIED" "$BDVER"; then
+    f_warn "bd.version" "$BDVER is newer than the $BD_VERIFIED these checks were exercised against. They parse bd's output, so re-verify the commands before trusting a surprising finding — and bump BD_VERIFIED once you have."
+else
+    f_info "bd.version" "$BDVER"
+fi
 
 # --- backend / mode, from metadata.json (the authority change-mode.sh uses)
 if [ ! -f "$META" ]; then

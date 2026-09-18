@@ -542,3 +542,40 @@ apply() { run bash -c "cd '$PROJECT' && '$CONFIG_AUDIT' --no-network --apply $*"
     [[ "$output" == *"set doctor.suppress.cursor-integration=true"* ]]
     [[ "$output" == *"committed the Dolt working set"* ]]
 }
+
+# =============================================================================
+# bd version gate (a minimum, not a range)
+# =============================================================================
+
+@test "config-audit: ver_lt orders versions correctly" {
+    # shellcheck disable=SC1090
+    . <(sed -n '/^ver_lt() {/,/^}/p' "$CONFIG_AUDIT")
+
+    ver_lt 1.2.9 1.3.0                       # older major.minor
+    ver_lt 1.2   1.3.0                       # short form
+    ver_lt 0.9.9 1.3.0
+    ! ver_lt 1.3.0 1.3.0                     # equal is not less
+    ! ver_lt 1.3.1 1.3.0
+    ! ver_lt 1.4.0 1.3.0
+    ! ver_lt 1.10.0 1.3.0                    # numeric, not lexical: 10 > 3
+    ! ver_lt 2.0.0 1.3.0
+    ! ver_lt 1.3 1.3.0                       # missing field reads as 0
+}
+
+@test "config-audit: --check-version needs no project and reports the gate" {
+    local bare; bare="$(mktemp -d "$BD_TESTS_BASE/bdt-nowhere.XXXXXX")"
+    run bash -c "cd '$bare' && '$CONFIG_AUDIT' --check-version"
+    safe_rm "$bare"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"minimum"* ]]
+}
+
+@test "config-audit: BD_MIN is 1.3.0 and the script says so in one place" {
+    # CI asserts the requirement by running --check-version, so this constant is
+    # the single source of truth; a second copy anywhere is drift waiting to
+    # happen (six red commits on 2026-09-17 came from exactly that).
+    [ "$(grep -c '^BD_MIN=' "$CONFIG_AUDIT")" -eq 1 ]
+    grep -qx 'BD_MIN=1.3.0' "$CONFIG_AUDIT"
+    # and no 1.1/1.2 carve-outs survive
+    ! grep -qE '1\.1\.\*|1\.2\.\*' "$CONFIG_AUDIT"
+}

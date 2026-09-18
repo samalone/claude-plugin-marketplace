@@ -33,8 +33,7 @@ For a single-user, single-machine project:
   reliable, so never treat server mode on a solo project as drift to fix or a
   decision I need to make. Mode no longer changes any config value — it affects
   only which health checks are available (`bd sql` and `bd doctor` are
-  server-mode-only). `dolt.auto-push` used to branch on mode; it does not any
-  more, see below.
+  server-mode-only). `dolt.auto-push` does not branch on mode — see below.
 - `issues.jsonl` auto-export **OFF**, and the file untracked, deleted, and
   gitignored — I don't read it and it only creates surprise edits and junk
   commits.
@@ -52,7 +51,7 @@ For a single-user, single-machine project:
   enough premise to build on.
 - The backup system's git-push (`backup.git-push`) **OFF** — it force-commits
   and pushes on the working branch, which is exactly the friction I'm avoiding.
-- `dolt.auto-commit` left at bd's default (**on** in 1.1.0, regardless of mode)
+- `dolt.auto-commit` left at bd's default (**on**, regardless of mode)
   so writes land in Dolt history rather than piling up uncommitted in the
   working set. Do **not** force it off in either mode — an uncommitted working
   set is the state that can block migrations and brick `bd`.
@@ -66,20 +65,27 @@ For a single-user, single-machine project:
 
 ## Before you touch anything
 
-- **This is a fast-moving tool.** Command names, flags, and config defaults
-  change between versions. Before relying on any command below, confirm it with
-  `bd <command> --help` and adapt. If a command errors or isn't recognized, stop
-  and tell me rather than forcing it.
+- **Requires bd 1.3.0 or newer.** Everything below is written against 1.3.0 and
+  verified on it; `scripts/config-audit.sh` refuses to run on anything older
+  rather than produce confidently wrong findings. bd is still a fast-moving tool,
+  so on a *newer* release confirm a surprising command with `bd <command> --help`
+  before acting on it — but there are no longer any 1.1/1.2 carve-outs to reason
+  about, because every machine and project here is on 1.3.0.
 - **Verify every config change with `bd config get <key>`**, not just the exit
   code of `bd config set` — config routing for some keys has been buggy, and a
   `set` that reports success may not have taken.
-- **Duplicate/ambiguous config lines (confirmed in 1.1.0) — `bd config get`
-  alone can't detect them; inspect the file.** `bd config set` writes a setting
-  inconsistently: sometimes as a flat dotted key (`dolt.auto-push: true`) and
-  sometimes as a child of a nested block (`dolt:` → `    auto-push: true`),
-  depending on what's already in `.beads/config.yaml`. The same setting can end
-  up present in **both** forms at once, with **conflicting values**. When that
-  happens:
+- **Duplicate/ambiguous config lines — still live on 1.3.0, and `bd config get`
+  alone can't detect them.** This is not old-version baggage; the whole sequence
+  reproduces on 1.3.0. `bd config set` writes a setting inconsistently: as a child
+  of a nested block (`dolt:` → `    auto-push: true`) when no flat line exists,
+  and by updating a flat dotted key (`dolt.auto-push: true`) when one does. So a
+  setting can end up present in **both** forms at once, with **conflicting
+  values**. Measured end to end on 1.3.0: with a nested `false` in place, adding a
+  flat line and running `bd config set … true` left `dolt: auto-push: false` at
+  line 80 *and* `dolt.auto-push: true` at line 81; `bd config get` reported
+  `true`; and `bd config unset` then removed only the flat line, **uncovering the
+  stale nested `false`** — flipping the effective value rather than clearing it.
+  When that happens:
     - `bd config get <key>` silently returns only the **flat** dotted line and
       ignores the nested one — so it reports a single value and looks fine even
       though the file is ambiguous. Verifying with `get` is necessary but **not
@@ -123,46 +129,31 @@ For a single-user, single-machine project:
     skill depends on. Use `has()` for presence and a separate read for the value.
 
     `scripts/config-audit.sh` does all of this for you; see step 0.
-- **Known 1.1.0 display quirks — don't be fooled into "fixing" a non-problem.**
-  `bd dolt show` can print `Remotes: (none)` even when a remote exists, and the
-  remote key is `sync.remote` (so `bd config get sync.git-remote` reports "not
-  set" — that's the wrong key, not a missing remote). Treat
+- **Display quirks — don't be fooled into "fixing" a non-problem.** Both
+  reproduce on 1.3.0. `bd dolt show` prints `Remotes: (none)` even when a remote
+  exists (verified against `bd-mode`, which has one), and the remote key is
+  `sync.remote` (so `bd config get sync.git-remote` reports "not set in
+  config.yaml" — that's the wrong key, not a missing remote). Treat
   `bd dolt remote list` plus a successful `bd dolt push` (and the
   `refs/dolt/data` ref actually existing) as the source of truth for whether a
   working remote is in place. Never re-add a remote based on `bd dolt show` or a
   `sync.git-remote` lookup — you'd just be duplicating one that's already there.
-- **Known 1.1.0 command quirks around history — use `bd vc status`, not
-  `bd history`.** `bd vc log` does **not** exist in 1.1.0 (it's in older docs);
-  don't call it. But the `bd vc` group _does_ exist, and **`bd vc status`
-  works** — it reports the current branch, the HEAD commit, and whether the
-  working set is clean, which is the health/state signal you actually want (a
-  clean working set also confirms auto-commit is keeping up and nothing is
-  accumulating toward a migration brick). **A clean working set prints
-  nothing.** In 1.2.2 the command outputs only `Branch:` and `Commit:` when
-  there is nothing uncommitted — `bd vc status --help` confirms it shows "any
-  uncommitted changes", i.e. the changes line appears *only* when the set is
-  dirty. Absent output is therefore the pass, not a broken or truncated
-  command; don't go hunting for a cleanliness line that was never going to
-  print, and don't conclude the signal was dropped from the command.
-  **But do not treat it as the authority on cleanliness.** Measured on 1.3.0:
-  right after a `bd config set`, `bd vc status` printed branch and commit with
-  no changes line — reading as clean — while `bd doctor` in the same instant
-  reported `config: modified`, and `bd vc commit` went on to create a real
-  commit. So `bd vc status` under-reports at least table-level config changes.
-  When cleanliness actually matters (before a migration, or at final
-  verification), trust `bd doctor`'s `Dolt Status` / `Dolt Locks` checks and
-  treat `bd vc status` as the branch/commit readout only.
-  `bd history` does exist but is
-  currently broken on migrated databases (known bug, fix unmerged): it fails on
-  historical rows whose `description` was NULL, with
-  `Scan error on column index 2, name "description": converting NULL to string is unsupported`.
-  That's a read-path bug, **not** corruption — the tell is that it fails
-  _uniformly_ on every issue rather than on a few. Since migrated DBs are
-  exactly what this skill audits, treat a `bd history` failure as noise, don't
-  repair anything over it, and verify state with `bd vc status` plus `bd list`
-  and `bd dolt status`.
-- **Back up before migrating — but `bd backup` alone is no longer that
-  command.** As of 1.2.2 `bd backup` is a subcommand group
+- **`bd vc status` is the branch/commit readout, not the cleanliness
+  authority.** It reports the current branch and HEAD commit, and prints an
+  uncommitted-changes line *only* when the working set is dirty — so absent
+  output is the pass, not a truncated command. But it under-reports: measured on
+  1.3.0, right after a `bd config set` it printed branch and commit with no
+  changes line, reading as clean, while `bd doctor` in the same instant reported
+  `config: modified` and `bd vc commit` went on to create a real commit. When
+  cleanliness actually matters (before a migration, or at final verification),
+  trust `bd doctor`'s `Dolt Status` / `Dolt Locks` checks. There is no `bd vc
+  log` — that name is from older docs and now just prints the `bd vc` group
+  help. (`bd history <issue-id>` works fine on 1.3.0, including on migrated
+  databases — an older bug that made it fail on NULL descriptions is gone. It
+  takes an issue id now; bare `bd history` errors with "accepts 1 arg(s)".)
+
+- **Back up before migrating — but `bd backup` alone is not that command.**
+  `bd backup` is a subcommand group
   (`init`/`sync`/`restore`/`remove`/`status`): bare `bd backup` just prints help
   and backs nothing up, so a run that believes it "did the backup step" may have
   done nothing at all. Don't paper over that with `bd backup sync` either — it
@@ -203,9 +194,11 @@ project, before deciding anything.
 have already said to go ahead. The plan is read-only and lists the repairs in the
 order they would run.
 
-It needs `bd`, `git`, `jq`, and **mikefarah/yq v4** (`brew install yq`,
+It needs **bd 1.3.0+**, `git`, `jq`, and **mikefarah/yq v4** (`brew install yq`,
 `winget install MikeFarah.yq`). It refuses to run against kislyuk/yq, the
 unrelated Python tool of the same name that `apt install yq` provides.
+`config-audit.sh --check-version` checks the bd requirement on its own, without
+needing a project.
 
 Findings are `OK` / `FAIL` (mechanical drift) / `WARN` (repair is a judgement
 call) / `INFO` / `STOP` (do not let a repair pass near this project). Exit codes:
@@ -237,8 +230,11 @@ The script deliberately does **not** decide any of these; they stay with me:
   mechanism at all — `bd doctor` is unsupported there and exits 0 anyway, and
   `bd init` refuses to re-run
 
-If the script refuses on the bd version gate, stop and tell me rather than
-widening it: every check parses bd's output, and bd is a fast-moving tool.
+It requires **bd 1.3.0 or newer** and refuses anything older — every check parses
+bd's output, and the 1.1/1.2 carve-outs have been removed. On a bd *newer* than
+the one it was exercised against it still runs, but reports a `bd.version` WARN;
+re-verify a surprising finding against `bd <command> --help`, then bump
+`BD_VERIFIED` in the script.
 
 ### 1. Identify the project
 
@@ -263,7 +259,7 @@ widening it: every check parses bd's output, and bd is a fast-moving tool.
   `bd migrate --inspect` reports both the version skew *and* a
   `Registered Migrations:` count, and the two mean very different things:
     - **`Registered Migrations: 0`**, with a warning like *"schema version
-      mismatch (current: 1.1.0, expected: 1.2.2)"*, is a **metadata version
+      mismatch (current: 1.3.0, expected: 1.3.1)"*, is a **metadata version
       stamp only** — no DDL, no data rewrite. `bd migrate --dry-run` confirms it
       by reporting nothing but `Would update Dolt version: X → Y`. That is safe
       to apply in place even on a remote-backed database: apply it, then push.
@@ -341,9 +337,10 @@ until a real durability path is in place. If the remote can't be established
 
 Set each, then confirm with `bd config get`:
 
-- **Turn off auto-export and clean up the JSONL files.** First
-  `bd config set export.auto false` (a past release flipped this on by default,
-  so on an upgraded project it's an active change, not a no-op). Then handle the
+- **Turn off auto-export and clean up the JSONL files.** First set
+  `export.auto false`. bd 1.3.0 documents the default as `false`, but set it
+  explicitly anyway: an unset key is an inherited answer, not a stated one, and
+  these defaults have moved before. Then handle the
   two `.beads/*.jsonl` files — which are _not_ the same kind of thing:
     - **`issues.jsonl` — remove it entirely.** It's a regenerable snapshot of
       the issues table and I don't use it. Stopping the export is not enough on
@@ -395,12 +392,21 @@ Set each, then confirm with `bd config get`:
   HTTPS goes through the `osxkeychain` credential helper and the `gh` token
   instead, which need no unlock.
 
-  There is **no `set-url`** — `bd dolt remote` offers only `add`, `list`, and
-  `remove` (1.2.2) — so the change is remove-then-add:
+  There is **no `set-url`** — on 1.3.0 `bd dolt remote` offers `add`, `list`,
+  `remove` and `reset-data` (which replaces a remote's data plane after a history
+  squash, not its URL) — so the change is remove-then-add:
 
       bd dolt remote remove origin
-      bd dolt remote add origin https://<host>/<owner>/<repo>.git
+      bd dolt remote add origin https://<host>/<owner>/<repo>.git --allow-git-origin
       bd dolt push
+
+  **`--allow-git-origin` is required, not optional.** bd 1.3.0 aborts with
+  *"refusing to add … this URL matches the git origin"* for both the `https://`
+  and `git+https://` spellings — and a Dolt remote that *is* the git origin is
+  exactly the target state here, which is why the audit suppresses bd's own
+  `Dolt Remote vs Git Origin` warning. Without the flag the add fails, and since
+  the remove already succeeded the project is left with **no Dolt remote at
+  all**. If an add ever fails, re-add the original URL immediately.
 
   Removing the remote drops only the local registration; it does not touch
   `refs/dolt/data` on the server or anything in the local database. Then commit
@@ -424,10 +430,10 @@ Set each, then confirm with `bd config get`:
 - **Auto-push: turn it OFF, on every project.**
     - `bd config set dolt.auto-push false`, then **verify with
       `bd config get dolt.auto-push`** and check the file for a duplicate key.
-      Set it explicitly even when `bd config get` already reports `false`:
-      the default has changed before — bd's own source records that it once
-      "auto-enable[d] when an 'origin' remote exists" — so an unset key is an
-      inherited answer, not a stated one.
+      Set it explicitly even when `bd config get` already reports `false`: an
+      unset key is an inherited answer, not a stated one, and bd's own source
+      records a past default that "auto-enable[d] when an 'origin' remote
+      exists".
     - **Why not mode-dependent, and why my own single-writer habits are not
       enough.** The hazard is concurrent *push sources*, and the damage is to
       the remote: per `cmd/bd/dolt_autopush.go`, git-protocol Dolt remotes have
@@ -539,13 +545,10 @@ Set each, then confirm with `bd config get`:
   stacks `bd: backup …` commits on my working branch — never leave it on. If the
   `set` won't stick, tell me about the env-var workaround rather than looping.
 - **Leave `dolt.auto-commit` at bd's default** (`bd config get dolt.auto-commit`
-  — **on** in 1.1.0, with no mode distinction). Do **not** force it off, in
-  either mode: forcing it off lets writes accumulate uncommitted in the Dolt
-  working set, which is the state that blocks migrations and can brick every
-  `bd` command. (An older rationale for off-in-server was avoiding "database is
-  read only" errors under heavy concurrent writes — but 1.1.0 no longer splits
-  this default by mode, and that error hasn't shown up at my scale, whereas the
-  dirty-working-set brick has. Leave it on.)
+  reports **on**, with no mode distinction). Do **not** force it off, in either
+  mode: forcing it off lets writes accumulate uncommitted in the Dolt working
+  set, which is the state that blocks migrations and can brick every `bd`
+  command.
 
 - **`Agent Doc Divergence`: check for a symlink FIRST, then opt out.**
 
