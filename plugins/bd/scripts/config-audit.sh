@@ -75,7 +75,12 @@
 #   and want an opt-out comment whose text is false. Verified against entwine
 #   and legible, which report mode 120000 and share a blob hash.
 # * Paths reported by bd are native, so they go through cygpath -u when it
-#   exists before any test or comparison.
+#   exists before any test or comparison — and so does `git rev-parse
+#   --show-toplevel`, which reports `C:/Users/...` on Windows. Mixing the two
+#   spellings silently defeats relp(), whose prefix strip then matches nothing.
+# * MSYS2 grep opens files in TEXT mode and strips CRLF before matching, so it
+#   cannot be used to detect CR bytes on the one platform where they turn up.
+#   `tr -dc '\r'` reads binary everywhere; see the line-endings check.
 # * Never pipe a bd/git command into `grep -q`/`head`/`awk ... exit`: the early
 #   close SIGPIPEs the producer and, under pipefail, inverts the result. Every
 #   probe below captures first and matches against a here-string.
@@ -222,6 +227,17 @@ BEADS_DIR=$(posixpath "$BEADS_DIR")
 
 REPO_ROOT=$(git -C "$BEADS_DIR" rev-parse --show-toplevel 2>/dev/null) \
     || die "the beads dir is not inside a git repository"
+# Through cygpath as well. git reports a NATIVE root on Windows (`C:/Users/...`,
+# forward slashes but drive-lettered) while every bd-derived path above has
+# already been posixpath'd to `/c/Users/...`, so without this relp() strips
+# nothing and every "repo-relative" path comes out absolute. Read-only that is
+# merely cosmetic — MSYS converts the absolute path back for git, so is_tracked
+# and is_ignored still answer correctly — but under --apply the issues.jsonl and
+# interactions.jsonl repairs append $rel to .gitignore, and an absolute pattern
+# is a DEAD one: the leading slash anchors it to the repo root, so git looks for
+# `c/Users/...`, the finding never clears, and each re-run appends another line.
+# cygpath -u is idempotent, so a path that is already POSIX passes through.
+REPO_ROOT=$(posixpath "$REPO_ROOT")
 
 CFG="$BEADS_DIR/config.yaml"
 META="$BEADS_DIR/metadata.json"
@@ -361,7 +377,16 @@ esac
 # touches as LF while passing comment lines through with their CRs, leaving a
 # mixed-ending file. Normalizing once, up front, is an --apply action; here we
 # only report it.
-if [ -f "$CFG" ] && LC_ALL=C grep -q $'\r' "$CFG" 2>/dev/null; then
+#
+# NOT `grep -q $'\r'`. MSYS2 grep (GNU grep 3.0, Git Bash) opens files in TEXT
+# mode and strips CRLF before matching, so that test never fires on Windows —
+# the one platform this check exists for. Measured on a real CRLF config.yaml:
+# `grep -c` 0, `grep -cU` 69, same one-byte pattern. `tr -dc` keeps only the CR
+# bytes and is read as binary on every platform. Deliberately a command
+# substitution rather than a pipe into `cmp -s`/`head`: cmp stops at the first
+# difference, and that early close SIGPIPEs the producer and inverts the result
+# under pipefail — the same trap documented at the top of this file.
+if [ -f "$CFG" ] && [ -n "$(LC_ALL=C tr -dc '\r' < "$CFG" 2>/dev/null)" ]; then
     f_fail "config.line-endings" "config.yaml contains CR bytes. Normalize to LF before editing, or a yq write leaves the file with mixed endings (data lines LF, comments CRLF)."
 else
     [ -f "$CFG" ] && f_ok "config.line-endings" "LF"

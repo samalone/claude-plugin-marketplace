@@ -92,6 +92,14 @@ make_project() {
 #                        the value is NORMALIZED rather than merely unchanged.
 prepare_for_switch() {
     ( cd "$PROJECT" && bd dolt commit -m "fixture: initial" >/dev/null 2>&1 ) || true
+    # Register the Dolt remote explicitly rather than letting `bd dolt push`
+    # adopt one from the git origin. Implicit adoption builds `git+<origin>`,
+    # and on Windows the origin is a drive-lettered path, so that becomes
+    # `git+C:/Users/...` — Dolt then reads everything before the first colon as
+    # the URL scheme and rejects it: `unsupported git dbfactory scheme "git+c"`.
+    # An explicit add stores the path as-is and works on every platform; the end
+    # state is the same one bd would have reached on its own.
+    ( cd "$PROJECT" && bd dolt remote add origin "$ORIGIN" --allow-git-origin >/dev/null 2>&1 ) || true
     ( cd "$PROJECT" && bd dolt push >/dev/null 2>&1 ) \
         || { echo "fixture: 'bd dolt push' failed; cannot establish refs/dolt/data" >&2; return 1; }
     git -C "$PROJECT" ls-remote origin refs/dolt/data 2>/dev/null | grep -q . \
