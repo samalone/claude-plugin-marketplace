@@ -141,3 +141,13 @@ Two traps the fixtures hit, worth knowing before editing them:
 ## Plugin Repos
 
 - [claude-1password-plugin](https://github.com/samalone/claude-1password-plugin) — 1Password MCP server
+
+## Memory: beads vs. Claude Code auto-memory
+
+`bd prime` says not to use MEMORY.md files. Disregard that blanket rule and
+split by what the fact is *about*: `bd remember` for knowledge about this
+repo (conventions, gotchas, decisions — it travels on `refs/dolt/data` and
+any agent on any machine can read it; keep the count low, since prime injects
+every memory in full every session), and Claude Code auto-memory under
+`~/.claude/projects/<project>/memory/` for facts about me and how I want you
+to work. Explicit user instructions override the beads block, as it concedes.
