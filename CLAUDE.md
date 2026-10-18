@@ -107,7 +107,7 @@ shellcheck plugins/*/scripts/*.sh && shellcheck -x test/helpers/setup.bash
 bats test/                                    # ~9 min (see note below)
 ```
 
-**The suite is slow, and the cost is per-test by design.** 42 of the 55 tests
+**The suite is slow, and the cost is per-test by design.** 42 of the 59 tests
 call `make_project`, which runs a real `bd init` with a Dolt database, and 11
 use `--ready`, which also pushes to a bare origin. (`bd-sync.bats` is the
 exception: it stubs `bd`, and runs in seconds.) Measured at ~9 minutes on

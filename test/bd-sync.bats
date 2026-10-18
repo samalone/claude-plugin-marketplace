@@ -123,3 +123,39 @@ dead_pid() { sh -c 'exit 0' & local p=$!; wait "$p"; echo "$p"; }
     [[ "$output" == *"\"$BD_SYNC\""* ]]
     [[ "$output" != *"@BD_PLUGIN_ROOT@"* ]]
 }
+
+@test "bd-sync: a lock is live while its bd child is, even if the wrapper died" {
+    sleep 30 & local child=$!
+    mkdir "$LOCK"; { dead_pid; echo "$child"; } > "$LOCK/pid"
+    BD_SYNC_LOCK_WAIT=1 sync_in "$REPO"
+    kill "$child" 2>/dev/null || true
+    [ "$status" -eq 3 ]
+    [ ! -e "$BDS_LOG" ]
+}
+
+@test "bd-sync: records bd's PID in the lock beside its own" {
+    cat > "$FIXTURE/bin/bd" <<'STUB'
+#!/usr/bin/env bash
+wc -l < "$(git rev-parse --path-format=absolute --git-common-dir)/bd-sync.lock/pid" > "$BDS_LOG"
+STUB
+    sync_in "$REPO"
+    [ "$status" -eq 0 ]
+    [ "$(tr -d ' ' < "$BDS_LOG")" = 2 ]
+}
+
+@test "bd-sync: a lock it cannot create is an error, not contention" {
+    [ "$(id -u)" -ne 0 ] || skip "root ignores directory permissions"
+    chmod a-w "$REPO/.git"
+    BD_SYNC_LOCK_WAIT=30 sync_in "$REPO"
+    chmod u+w "$REPO/.git"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"cannot create"* ]]
+    [ ! -e "$BDS_LOG" ]
+}
+
+@test "bd-sync: rejects a non-numeric BD_SYNC_LOCK_WAIT" {
+    BD_SYNC_LOCK_WAIT=5s sync_in "$REPO"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"whole number"* ]]
+    [ ! -e "$BDS_LOG" ]
+}
