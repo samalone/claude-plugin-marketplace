@@ -76,6 +76,21 @@ teardown() {
     [ -n "$(sync_remote_line)" ]                        # survived set_auto_push's rewrite
 }
 
+# --- push lock --------------------------------------------------------------
+
+@test "change-mode: its pre-switch push waits on the clone's push lock" {
+    make_project --ready
+    local lock; lock="$(git -C "$PROJECT" rev-parse --path-format=absolute --git-common-dir)/bd-sync.lock"
+    mkdir "$lock"; echo $$ > "$lock/pid"            # an agent's bd-sync.sh mid-push
+
+    run bash -c "cd '$PROJECT' && env -u BEADS_DOLT_AUTO_START BD_SYNC_LOCK_WAIT=1 '$CHANGE_MODE' server"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"bd dolt push failed"* ]]
+    [ "$(meta dolt_mode)" = embedded ]              # aborted before anything moved
+    [ "$(cat "$lock/pid")" = "$$" ]                 # and left the holder's lock alone
+    rm -rf "$lock"
+}
+
 # --- rollback ---------------------------------------------------------------
 
 @test "change-mode: a failed switch rolls back mode, config, and data" {

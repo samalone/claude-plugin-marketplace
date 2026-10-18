@@ -35,6 +35,10 @@ set -euo pipefail
 
 PROG=change-mode
 
+# Every push to the Dolt remote goes through this clone's push lock, so it can
+# never overlap an agent's bd-sync.sh in another worktree (see with-sync-lock.sh).
+SYNC_LOCK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/with-sync-lock.sh"
+
 # ---------------------------------------------------------------------------
 # output helpers
 # ---------------------------------------------------------------------------
@@ -312,7 +316,7 @@ cmd_switch() {
     # ---- Phase B: make remote current, quiesce, back up -------------------
     step "Ensuring refs/dolt/data is up to date"
     bd dolt commit -m "change-mode: pre-switch commit" >/dev/null 2>&1 || true   # capture any working set
-    bd dolt push >/dev/null 2>&1 || die "bd dolt push failed — off-machine copy not established, aborting"
+    "$SYNC_LOCK" bd dolt push >/dev/null 2>&1 || die "bd dolt push failed — off-machine copy not established, aborting"
     _ref=$(git -C "$REPO_ROOT" ls-remote origin refs/dolt/data 2>/dev/null) || _ref=""
     [ -n "$_ref" ] || die "refs/dolt/data missing after push"
     info "pushed; refs/dolt/data is current"

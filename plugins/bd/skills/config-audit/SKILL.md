@@ -191,6 +191,13 @@ project, before deciding anything.
 "<plugin>/scripts/config-audit.sh" --apply --yes   # perform the repairs, then re-audit
 ```
 
+**Every push you run by hand goes through the push lock.** Wherever this skill
+says `bd dolt push`, run `"<plugin>/scripts/with-sync-lock.sh" bd dolt push`.
+The lock is shared with every agent's post-`git push` `bd-sync.sh` in the other
+worktrees of this clone, and two pushes overlapping can silently corrupt the
+remote (see the auto-push note in step 4). The script's own repairs already
+push this way; a bare push from you is the one gap left.
+
 **Always show me the `--apply` plan before running `--apply --yes`**, unless I
 have already said to go ahead. The plan is read-only and lists the repairs in the
 order they would run.
@@ -399,7 +406,7 @@ Set each, then confirm with `bd config get`:
 
       bd dolt remote remove origin
       bd dolt remote add origin https://<host>/<owner>/<repo>.git --allow-git-origin
-      bd dolt push
+      "<plugin>/scripts/with-sync-lock.sh" bd dolt push
 
   **`--allow-git-origin` is required, not optional.** bd 1.3.0 aborts with
   *"refusing to add … this URL matches the git origin"* for both the `https://`
@@ -468,7 +475,9 @@ Set each, then confirm with `bd config get`:
       it holds a lock directory in the git common dir around the sync, so the
       worktrees of one clone push one at a time. That makes this machine a
       single push source without a timer; it does nothing about a hand-run
-      `bd sync` or a second machine.
+      `bd sync` or a second machine. The lock itself lives in
+      `scripts/with-sync-lock.sh`, which this script's repairs and
+      `change-mode.sh` push through as well.
     - Report that off-machine sync relies on `bd-sync.sh` at git-push time, for every
       project rather than only server-mode ones.
 - **Gitignore: let bd own its patterns, and add the one it misses.**

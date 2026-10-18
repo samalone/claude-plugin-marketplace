@@ -76,7 +76,9 @@ reach for `--ignore-schema-skew`.
    origin, and a clean `bd migrate --dry-run`. Any failure here aborts before
    anything is touched.
 2. **Push.** `bd dolt commit` + `bd dolt push`, so an off-machine copy exists
-   before the data moves. A failed push aborts the switch — that is deliberate.
+   before the data moves. The push takes the same lock as agents' `bd-sync.sh`
+   (`scripts/with-sync-lock.sh`), waiting up to 90s for it. A failed push —
+   including a lock wait that times out — aborts the switch; that is deliberate.
 3. **Quiesce and back up.** Stops the server if leaving server mode, then copies
    the Dolt data directory to a temp backup.
 4. **Flip.** Rewrites `dolt_mode` in `metadata.json` and `dolt.auto-push` in

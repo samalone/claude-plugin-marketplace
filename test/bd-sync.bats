@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# bd-sync: the lock around `bd sync`, and the guidance that points agents at it.
+# bd-sync / with-sync-lock: the push lock, and the guidance that points agents at it.
 #
 # `bd` here is a stub that logs its arguments and exits with $BDS_RC, so these
 # tests need no Dolt fixture and run in seconds. What they pin down is the lock:
@@ -10,6 +10,7 @@
 load helpers/setup
 
 BD_SYNC="$REPO_ROOT/plugins/bd/scripts/bd-sync.sh"
+WITH_LOCK="$REPO_ROOT/plugins/bd/scripts/with-sync-lock.sh"
 INJECT="$REPO_ROOT/plugins/bd/scripts/inject-beads-workflow.sh"
 
 setup() {
@@ -158,4 +159,25 @@ STUB
     [ "$status" -eq 1 ]
     [[ "$output" == *"whole number"* ]]
     [ ! -e "$BDS_LOG" ]
+}
+
+# --- the lock as a general wrapper -------------------------------------------
+
+@test "with-sync-lock: runs any command under the lock and returns its status" {
+    run bash -c "cd '$REPO' && '$WITH_LOCK' sh -c 'test -d \"\$1\" && exit 7' x '$LOCK'"
+    [ "$status" -eq 7 ]                             # ran while the lock existed
+    [ ! -e "$LOCK" ]
+    run bash -c "cd '$REPO' && '$WITH_LOCK'"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"usage"* ]]
+}
+
+# The regression this guards: a plugin script that pushes to the Dolt remote
+# without the lock races every agent's bd-sync.sh. Matches `bd dolt push` and
+# `bd sync` only in command position, so prose and messages that name them
+# (`\`bd dolt push\` failed`) don't trip it.
+@test "with-sync-lock: no plugin script pushes to the Dolt remote outside the lock" {
+    local re='(^|[;&|]|then|do|if|\$\()[[:space:]]*bd (dolt push|sync)([^[:alnum:]_-]|$)'
+    run bash -c "grep -nE '$re' '$REPO_ROOT'/plugins/*/scripts/*.sh | grep -v '^[^:]*:[0-9]*:[[:space:]]*#'"
+    [ -z "$output" ] || { echo "unlocked push: $output"; false; }
 }

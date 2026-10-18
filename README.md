@@ -97,7 +97,7 @@ Additions to the **public** beads plugin (`beads@beads-marketplace`), not a repl
 - **Source:** embedded — [`plugins/bd`](plugins/bd)
 - **Install:** `/plugin install bd@samalone-plugins` (alongside `/plugin install beads@beads-marketplace`)
 
-**Workflow guidance (self-gating).** A `SessionStart` hook walks up from the session directory looking for `.beads/` and emits nothing when there is none, so the plugin is safe to install once at the user level. The injected guidance covers claiming, closing vs. merging, gates, discovered work, multi-worktree rules, and syncing beads after every `git push` through `scripts/bd-sync.sh` — `bd sync` under a lock in the git common dir, so parallel worktree sessions never push to the Dolt remote at once.
+**Workflow guidance (self-gating).** A `SessionStart` hook walks up from the session directory looking for `.beads/` and emits nothing when there is none, so the plugin is safe to install once at the user level. The injected guidance covers claiming, closing vs. merging, gates, discovered work, multi-worktree rules, and syncing beads after every `git push` through `scripts/bd-sync.sh` — `bd sync` under a lock in the git common dir (`scripts/with-sync-lock.sh`), so parallel worktree sessions never push to the Dolt remote at once. `change-mode.sh` and the audit's repairs push under the same lock.
 
 **`/bd:plan <bead-id>`.** Runs a full plan-mode session against one bead and writes the approved plan into that bead's `design` field, for a different session in a different worktree to execute. It never implements. Two frontmatter settings shape how it runs:
 

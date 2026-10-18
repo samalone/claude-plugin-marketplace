@@ -89,6 +89,10 @@ set -euo pipefail
 
 PROG=config-audit
 
+# Every push to the Dolt remote goes through this clone's push lock, so it can
+# never overlap an agent's bd-sync.sh in another worktree (see with-sync-lock.sh).
+SYNC_LOCK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/with-sync-lock.sh"
+
 # ---------------------------------------------------------------------------
 # immediate output (diagnostics; the report itself is built separately)
 # ---------------------------------------------------------------------------
@@ -911,7 +915,7 @@ apply_one() {
         fi ;;
 
     remote.ref)
-        if bd dolt push >/dev/null 2>&1; then
+        if "$SYNC_LOCK" bd dolt push >/dev/null 2>&1; then
             did "pushed refs/dolt/data to origin (first off-machine copy)"
         else
             skipped "refs/dolt/data: \`bd dolt push\` failed — nothing that deletes data will run"
@@ -923,7 +927,7 @@ apply_one() {
         # finding, and --apply refuses to run at all when one is present.
         if bd migrate >/dev/null 2>&1; then
             did "applied the schema version stamp (\`bd migrate\`, 0 registered migrations)"
-            bd dolt push >/dev/null 2>&1 && did "pushed the migrated database"
+            "$SYNC_LOCK" bd dolt push >/dev/null 2>&1 && did "pushed the migrated database"
         else
             skipped "schema stamp: \`bd migrate\` failed"
         fi ;;
@@ -1123,7 +1127,7 @@ if [ "$APPLY" = 1 ]; then
     if [ "$DB_WROTE" = 1 ]; then
         if bd vc commit -m "config-audit: bring config into the audited state" >/dev/null 2>&1; then
             did "committed the Dolt working set (db-resident config writes)"
-            bd dolt push >/dev/null 2>&1 && did "pushed the config commit"
+            "$SYNC_LOCK" bd dolt push >/dev/null 2>&1 && did "pushed the config commit"
         else
             skipped "Dolt working set: \`bd vc commit\` found nothing to commit, or failed"
         fi
