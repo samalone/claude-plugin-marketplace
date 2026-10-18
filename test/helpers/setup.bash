@@ -79,7 +79,9 @@ make_project() {
 # audit is a *skill* (instructions for Claude), not a script, so it cannot be
 # invoked from a test. Keep this in sync with cmd_switch's Phase A.
 #
-#   * sync.remote      — already written by `bd init` from the git origin URL.
+#   * sync.remote      — already written by `bd init` from the git origin URL,
+#                        flat on older bd, nested (`sync:` / `remote:`) since
+#                        1.3.1. Tests that care which use nest_/flatten_sync_remote.
 #   * refs/dolt/data   — must exist on origin; created by the first `bd dolt push`.
 #   * export.auto      — false (bd's default; asserted here so a default change
 #                        surfaces as a test failure rather than a silent warning).
@@ -105,7 +107,7 @@ prepare_for_switch() {
     git -C "$PROJECT" ls-remote origin refs/dolt/data 2>/dev/null | grep -q . \
         || { echo "fixture: origin has no refs/dolt/data after push" >&2; return 1; }
 
-    [ -n "$(sync_remote_line)" ] \
+    [ -n "$(sync_remote_value)" ] \
         || { echo "fixture: bd init did not write sync.remote" >&2; return 1; }
 
     append_config_line 'export.auto: false'
@@ -132,21 +134,45 @@ meta() { jq -r ".$1 // empty" "$PROJECT/.beads/metadata.json"; }
 # The single flat dolt.auto-push line (empty if absent/duplicated).
 autopush_line() { grep -E '^dolt\.auto-push:' "$PROJECT/.beads/config.yaml" || true; }
 
-# The sync.remote line from the fixture's config.yaml (empty if absent).
+# The flat `sync.remote:` line from the fixture's config.yaml (empty if absent).
 sync_remote_line() { grep -E '^sync\.remote:' "$PROJECT/.beads/config.yaml" || true; }
 
+# The configured sync.remote value in EITHER spelling bd writes (empty if
+# absent). yq reads the flat key and the nested block for what they are and
+# skips commented-out lines, which a grep for one spelling cannot — bd 1.3.1
+# switched `bd init` from flat to nested and broke exactly such a grep.
+sync_remote_value() {
+    yq '.["sync.remote"] // .sync.remote // ""' "$PROJECT/.beads/config.yaml"
+}
+
 # Rewrite the fixture's flat `sync.remote:` line into the nested block form —
-# what `bd config set sync.remote` writes when no flat line exists to reuse,
-# which is where a project ends up after the audit's SSH->HTTPS remote repair
-# (`bd dolt remote remove` comments the flat line out). bd reads both; so must
-# the script.
+# what `bd init` writes since 1.3.1, and what `bd config set sync.remote` writes
+# when no flat line exists to reuse, which is where a project ends up after the
+# audit's SSH->HTTPS remote repair (`bd dolt remote remove` comments the flat
+# line out). bd reads both; so must the script. A no-op if already nested.
 nest_sync_remote() {
     local cfg="$PROJECT/.beads/config.yaml" url
+    [ -z "$(sync_remote_line)" ] && [ -n "$(sync_remote_value)" ] && return 0
     url=$(sed -n -E 's/^sync\.remote:[[:space:]]*"?([^"]*[^"[:space:]])"?[[:space:]]*$/\1/p' "$cfg")
     [ -n "$url" ] || { echo "fixture: no flat sync.remote line to nest" >&2; return 1; }
     sed -e 's/^sync\.remote:/# sync.remote:/' "$cfg" > "$cfg.tmp" && mv -f "$cfg.tmp" "$cfg"
     append_config_line "sync:"
     printf '    remote: "%s"\n' "$url" >> "$cfg"
+}
+
+# The inverse: replace the nested block with a flat `sync.remote:` line — what
+# `bd init` wrote before 1.3.1, and what most existing projects still carry.
+# Assumes the block holds only `remote:`, as bd init writes it. A no-op if
+# already flat.
+flatten_sync_remote() {
+    local cfg="$PROJECT/.beads/config.yaml" url
+    [ -n "$(sync_remote_line)" ] && return 0
+    url=$(sync_remote_value)
+    [ -n "$url" ] || { echo "fixture: no sync.remote to flatten" >&2; return 1; }
+    awk '/^sync:[[:space:]]*$/ { insync = 1; next }
+         insync && /^[[:space:]]/ { next }
+         { insync = 0; print }' "$cfg" > "$cfg.tmp" && mv -f "$cfg.tmp" "$cfg"
+    append_config_line "sync.remote: \"$url\""
 }
 
 # Content signature of the issue set, stable across a byte-identical DB copy.

@@ -230,7 +230,7 @@ inside the block, so it is regenerated away
 EOF
     git -C "$PROJECT" add CLAUDE.md
     audit
-    [ "$(status_of 'claudemd.memory-note')" = "FAIL" ]
+    [ "$(status_of 'claudemd.memory-note')" = "WARN" ]   # not FAIL: --apply must never act on it (ec1c542)
     [[ "$(finding 'claudemd.memory-note')" == *"INSIDE"* ]]
 
     cat > "$PROJECT/CLAUDE.md" <<'EOF'

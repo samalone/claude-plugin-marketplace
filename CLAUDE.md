@@ -122,6 +122,10 @@ Two traps the fixtures hit, worth knowing before editing them:
 - **`bd init` writes `.beads/config.yaml` with no trailing newline.** A naive
   `>>` append lands on the end of the `sync.remote` line and silently corrupts
   it. Use the harness's `append_config_line`.
+- **`sync.remote` has two spellings, and `bd init` changed which it writes.**
+  Flat `sync.remote:` before bd 1.3.1, a nested `sync:` / `remote:` block since.
+  Read it with the harness's `sync_remote_value` (yq, both forms), and pin the
+  form a test depends on with `nest_sync_remote` / `flatten_sync_remote`.
 - **The audit's CHECKS are now a script; its repairs are still a skill.**
   `config-audit.sh` is read-only and covered by `test/config-audit.bats`.
   `prepare_for_switch` in the harness still reimplements only the preconditions

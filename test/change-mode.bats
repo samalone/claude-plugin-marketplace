@@ -5,7 +5,7 @@
 load helpers/setup
 
 setup() {
-    require_tools
+    require_tools yq        # the harness reads sync.remote with yq
 }
 
 teardown() {
@@ -60,6 +60,20 @@ teardown() {
     [ "$(meta dolt_mode)" = server ]
     # the nested block survived the config rewrite set_auto_push does
     grep -qE '^[[:space:]]+remote:' "$PROJECT/.beads/config.yaml"
+}
+
+@test "change-mode: reads sync.remote in the flat form older bd init wrote" {
+    make_project --ready
+    flatten_sync_remote
+    [ -n "$(sync_remote_line)" ]                        # flat line present...
+    ! grep -qE '^sync:' "$PROJECT/.beads/config.yaml"   # ...and no nested block
+    ( cd "$PROJECT" && bd config get sync.remote ) | grep -q "$ORIGIN"   # bd still sees it
+
+    run bash -c "cd '$PROJECT' && env -u BEADS_DOLT_AUTO_START '$CHANGE_MODE' server"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"sync.remote is not configured"* ]]
+    [ "$(meta dolt_mode)" = server ]
+    [ -n "$(sync_remote_line)" ]                        # survived set_auto_push's rewrite
 }
 
 # --- rollback ---------------------------------------------------------------
