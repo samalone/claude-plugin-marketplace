@@ -50,8 +50,9 @@ esac
 
 # reclaim_if_stale — remove the lock if its holder is gone. The pid file holds
 # the script's PID and the bd process's, and the lock is live while EITHER is:
-# a wrapper killed on its own leaves bd still pushing. All dead is conclusive; a missing PID file is the holder's mkdir-to-write window, so it
-# only counts as dead once the directory is over a minute old. The rename makes
+# a wrapper killed on its own leaves bd still pushing. All dead is conclusive;
+# a missing PID file is the holder's mkdir-to-write window, so it only counts
+# as dead once the directory is over a minute old. The rename makes
 # the reclaim itself race-free between two waiters: only one mv succeeds. (One
 # window remains — a waiter that read the dead PID before another reclaimed and
 # re-locked can move the fresh lock aside. It needs a crashed holder AND two

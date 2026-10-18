@@ -82,8 +82,9 @@ silently corrupt the Dolt remote. So **whenever you `git push`, also run**:
     "@BD_PLUGIN_ROOT@/scripts/bd-sync.sh"
 
 It runs `bd sync` (pull, merge, push) under a lock shared by every worktree of
-this clone, so only one session on this machine is ever pushing. Act on its exit
-status:
+this clone, so only one session on this machine is ever pushing. It can wait up
+to 90 seconds for that lock and then sync, so give the Bash call a timeout of
+at least five minutes (300000 ms). Act on its exit status:
 
 - **0** — synced. Nothing to say.
 - **3** — transient (lost a push race, a writer was busy, or another sync held
