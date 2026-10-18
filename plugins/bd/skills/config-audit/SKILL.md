@@ -45,8 +45,9 @@ For a single-user, single-machine project:
   while 1Password is unlocked and I'm at the machine; a background auto-push
   over SSH fails unpredictably depending on the lock state and whether I'm AFK.
 - `dolt.auto-push` **OFF on every project, unconditionally** — set explicitly
-  to `false`, never left to the default. Off-machine sync is a deliberate
-  `bd sync` (or `bd dolt push`) that I run. See the auto-push note below for
+  to `false`, never left to the default. Off-machine sync is the plugin's
+  `scripts/bd-sync.sh`, which the injected guidance has agents run after every
+  `git push`. See the auto-push note below for
   why this is not mode-dependent and why "I am a single writer" is not a safe
   enough premise to build on.
 - The backup system's git-push (`backup.git-push`) **OFF** — it force-commits
@@ -463,7 +464,12 @@ Set each, then confirm with `bd config get`:
       automate in eventually — a GitHub ref used as an atomic lock
       (`--force-with-lease=refs/beads/push-lock:` for create-only semantics) is
       the sketch, with stale-lock TTL as the unsolved part.
-    - Report that off-machine sync relies on explicit `bd sync`, for every
+    - **What the agents run is `scripts/bd-sync.sh`**, not a bare `bd sync`:
+      it holds a lock directory in the git common dir around the sync, so the
+      worktrees of one clone push one at a time. That makes this machine a
+      single push source without a timer; it does nothing about a hand-run
+      `bd sync` or a second machine.
+    - Report that off-machine sync relies on `bd-sync.sh` at git-push time, for every
       project rather than only server-mode ones.
 - **Gitignore: let bd own its patterns, and add the one it misses.**
     - **Server mode → `bd doctor --fix --yes`.** bd maintains
@@ -790,7 +796,7 @@ Set each, then confirm with `bd config get`:
 Summarize concisely: version and mode found (state the mode neutrally — server
 and embedded are both acceptable, so the mode itself is never an open
 question; include the reminder that auto-push is off on every project, so
-off-machine sync of issue data happens only on an explicit `bd sync`),
+off-machine sync of issue data happens only when an agent runs `bd-sync.sh` after a git push),
 schema state (and whether you migrated), each config value before/after, the
 doctor warning count before and after, and anything that needs my decision — a remote-backed database mid-migration, or a
 suspected pre-Dolt project you declined to touch. Do not narrate every command;

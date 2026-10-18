@@ -10,10 +10,10 @@ argument-hint: "[embedded|server]"
 Beads stores its Dolt database in a different directory per mode, so switching
 is a physical transfer, not a config flag:
 
-| Mode | Data directory | `dolt.auto-push` |
-|------|----------------|------------------|
-| `embedded` | `.beads/embeddeddolt/<db>` | `true` |
-| `server` | `.beads/dolt/<db>` | `false` |
+| Mode | Data directory |
+|------|----------------|
+| `embedded` | `.beads/embeddeddolt/<db>` |
+| `server` | `.beads/dolt/<db>` |
 
 **This is my deliberate choice, not drift.** The two modes differ in real ways —
 server mode is noticeably faster, embedded mode has no server process to manage.
@@ -22,10 +22,11 @@ never second-guesses this decision*; that silence is not a statement that the
 modes are interchangeable. Never run this skill on your own initiative, and never
 suggest a switch because a project "should" be in the other mode.
 
-`auto-push` is the one setting genuinely determined by the mode, and the script
-flips it: embedded is single-writer, so background durability is safe; server
-mode permits concurrent writers, and concurrent auto-push to a git remote can
-corrupt remote history.
+`dolt.auto-push` is NOT determined by the mode: the script normalizes it to
+`false` in both directions. The hazard is concurrent push sources, and parallel
+sessions are concurrent even in single-writer embedded mode, because the push
+runs in each bd process rather than in the database. See `/bd:config-audit` for
+the full reasoning; off-machine sync is the plugin's `scripts/bd-sync.sh`.
 
 ## Running it
 

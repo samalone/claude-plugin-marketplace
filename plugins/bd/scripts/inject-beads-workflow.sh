@@ -14,7 +14,11 @@
 # signal (see personal-project) are opted into per project instead.
 #
 # SessionStart hooks add their stdout to the session context (same mechanism as
-# `bd prime`), so emitting the file contents is all that's needed.
+# `bd prime`), so emitting the file contents is nearly all that's needed. The
+# one rewrite: @BD_PLUGIN_ROOT@ becomes this plugin's install path, so the
+# guidance can name bundled scripts (bd-sync.sh) by an absolute path the agent
+# can run. awk with index(), not sed, so no character in the path is special;
+# and via ENVIRON, not -v, which would eat the backslashes in a Windows path.
 
 set -eu
 
@@ -30,7 +34,14 @@ shared="${CLAUDE_PLUGIN_ROOT:-}/shared/beads-pr-workflow.md"
 dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 while [ -n "$dir" ] && [ "$dir" != "/" ]; do
     if [ -d "$dir/.beads" ]; then
-        cat "$shared"
+        BD_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}" awk '{
+            root = ENVIRON["BD_PLUGIN_ROOT"]; out = ""
+            while ((i = index($0, "@BD_PLUGIN_ROOT@")) > 0) {
+                out = out substr($0, 1, i - 1) root
+                $0 = substr($0, i + 16)
+            }
+            print out $0
+        }' "$shared"
         exit 0
     fi
     dir=$(dirname "$dir")

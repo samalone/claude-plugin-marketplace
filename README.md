@@ -97,7 +97,7 @@ Additions to the **public** beads plugin (`beads@beads-marketplace`), not a repl
 - **Source:** embedded — [`plugins/bd`](plugins/bd)
 - **Install:** `/plugin install bd@samalone-plugins` (alongside `/plugin install beads@beads-marketplace`)
 
-**Workflow guidance (self-gating).** A `SessionStart` hook walks up from the session directory looking for `.beads/` and emits nothing when there is none, so the plugin is safe to install once at the user level. The injected guidance covers claiming, closing vs. merging, gates, discovered work, and multi-worktree rules.
+**Workflow guidance (self-gating).** A `SessionStart` hook walks up from the session directory looking for `.beads/` and emits nothing when there is none, so the plugin is safe to install once at the user level. The injected guidance covers claiming, closing vs. merging, gates, discovered work, multi-worktree rules, and syncing beads after every `git push` through `scripts/bd-sync.sh` — `bd sync` under a lock in the git common dir, so parallel worktree sessions never push to the Dolt remote at once.
 
 **`/bd:plan <bead-id>`.** Runs a full plan-mode session against one bead and writes the approved plan into that bead's `design` field, for a different session in a different worktree to execute. It never implements. Two frontmatter settings shape how it runs:
 
@@ -113,8 +113,8 @@ Additions to the **public** beads plugin (`beads@beads-marketplace`), not a repl
 - `dolt.auto-push` off on **every** project, set explicitly rather than left to
   the default — git-protocol Dolt remotes have no chunk-level upload atomicity,
   and the debounce is an unlocked read-modify-write, so even one machine running
-  parallel agent sessions is a multi-writer setup. Off-machine sync is a
-  deliberate `bd sync`.
+  parallel agent sessions is a multi-writer setup. Off-machine sync is
+  `scripts/bd-sync.sh`, which agents run after each `git push`.
 - `backup.git-push` off; `dolt.auto-commit` left at bd's default
 - schema matched to the installed `bd`, and mode-appropriate health checks
 
@@ -149,7 +149,7 @@ every comment byte-identical.
 
 **`/bd:change-mode [embedded|server]`.** Switches the project's Dolt database between embedded mode (`.beads/embeddeddolt/`) and project-server mode (`.beads/dolt/`). The modes are not interchangeable — server mode is noticeably faster, embedded mode has no server process to manage — so this is a deliberate choice, and `disable-model-invocation: true` keeps the skill slash-only so the model can never switch modes on its own initiative. `/bd:config-audit` treats either mode as acceptable precisely so it never second-guesses that choice.
 
-Because the two modes keep their database in different directories, a switch is a physical transfer rather than a config flag. `scripts/change-mode.sh` pushes `refs/dolt/data` first so an off-machine copy exists, backs the database up to a temp directory, copies it across (falling back to `bd bootstrap` from the remote), flips `dolt.auto-push` to match the mode — on for single-writer embedded, off for server, where concurrent auto-push can corrupt remote history — and verifies a per-issue `{id, status, updated_at}` fingerprint against the pre-switch value. Any failure rolls back the mode, config, and data, and restarts a server it had stopped. It never commits: `metadata.json` and `config.yaml` are left modified for you to review.
+Because the two modes keep their database in different directories, a switch is a physical transfer rather than a config flag. `scripts/change-mode.sh` pushes `refs/dolt/data` first so an off-machine copy exists, backs the database up to a temp directory, copies it across (falling back to `bd bootstrap` from the remote), normalizes `dolt.auto-push` to false in both modes (see the audit above for why it is not mode-dependent), and verifies a per-issue `{id, status, updated_at}` fingerprint against the pre-switch value. Any failure rolls back the mode, config, and data, and restarts a server it had stopped. It never commits: `metadata.json` and `config.yaml` are left modified for you to review.
 
 Git hooks are out of scope by design. `bd init` and `bd hooks install` own the beads git hooks, and the plugin defers to them rather than writing sync sections of its own.
 

@@ -2,8 +2,9 @@
 
 This is injected by a `SessionStart` hook whenever a `.beads/` directory is found
 above the project. It describes how I want beads *used* during a session. It does
-**not** cover configuration or sync — those are handled by my per-project setup
-(see the `/bd:config-audit` skill), and are deliberately not your concern here.
+**not** cover configuration — that is handled by my per-project setup (see the
+`/bd:config-audit` skill), and is deliberately not your concern here. The one
+storage duty that *is* yours is the sync after a git push, at the end.
 
 **Scope.** This assumes Dolt-era beads (`bd` 1.0+), where issue state lives in a
 Dolt database. If a project is on a pre-Dolt version (0.x), none of the model
@@ -72,10 +73,32 @@ of the same clone open at once. All of them share the one live task graph, so:
 - Put the bead ID in the branch and PR (e.g. `(bd-a1b2)`) so the issue and its
   code stay traceable to each other.
 
+## Sync beads after every git push
+
+Nothing pushes beads data off this machine automatically: `dolt.auto-push` is
+off on every project, because concurrent pushes from parallel sessions can
+silently corrupt the Dolt remote. So **whenever you `git push`, also run**:
+
+    "@BD_PLUGIN_ROOT@/scripts/bd-sync.sh"
+
+It runs `bd sync` (pull, merge, push) under a lock shared by every worktree of
+this clone, so only one session on this machine is ever pushing. Act on its exit
+status:
+
+- **0** — synced. Nothing to say.
+- **3** — transient (lost a push race, a writer was busy, or another sync held
+  the lock too long); nothing was pushed. Mention it in one line and move on —
+  the next push syncs again. Don't loop on it.
+- **2, 4, or anything else** — stop and tell me. Never resolve a beads merge
+  conflict, force-push, or reset the Dolt remote yourself.
+
+**Never run a bare `bd sync` or `bd dolt push`.** They bypass the lock, which
+only protects pushes that go through the script.
+
 ## Storage and config are managed for me — stay out of them
 
-Durability and remote sync are handled automatically by my setup; they're not
-something you need to manage. Keep your focus on the code.
+Apart from that sync, durability and config are handled by my setup. Keep your
+focus on the code.
 
 - **Do not** run `bd backup` or migrations, and do not touch the `.beads/` data
   directories, unless I explicitly ask. If something about the database or config

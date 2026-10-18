@@ -107,9 +107,10 @@ shellcheck plugins/*/scripts/*.sh && shellcheck -x test/helpers/setup.bash
 bats test/                                    # ~9 min (see note below)
 ```
 
-**The suite is slow, and the cost is per-test by design.** 41 of the 46 tests
-call `make_project`, which runs a real `bd init` with a Dolt database, and six
-use `--ready`, which also pushes to a bare origin. Measured at ~9 minutes on
+**The suite is slow, and the cost is per-test by design.** 42 of the 55 tests
+call `make_project`, which runs a real `bd init` with a Dolt database, and 11
+use `--ready`, which also pushes to a bare origin. (`bd-sync.bats` is the
+exception: it stubs `bd`, and runs in seconds.) Measured at ~9 minutes on
 2026-09-18 (macOS, with 18 unrelated project Dolt servers running); it was ~3
 minutes when the suite was change-mode only. CI's `timeout-minutes: 40` still has
 headroom, but less than it used to. If it needs to come down, the lever is
