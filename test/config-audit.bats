@@ -170,6 +170,9 @@ status_of() {
     audit
     [[ "$(finding 'agents.kind')" == *"independent"* ]]
     [ "$(status_of 'agents.optout')" = "FAIL" ]
+    # The preferred fix is one file, linked in the safe direction.
+    [ "$(status_of 'agents.symlink')" = "INFO" ]
+    [[ "$(finding 'agents.symlink')" == *"ln -s CLAUDE.md AGENTS.md"* ]]
 }
 
 # --- pre-marker residue ------------------------------------------------------

@@ -637,11 +637,12 @@ elif [ ! -e "$AGENTS" ]; then
     AGENTS_TARGET=""
 else
     f_info "agents.kind" "AGENTS.md is an independent file"
+    f_info "agents.symlink" "preferred: if AGENTS.md holds nothing hand-written (only bd-generated blocks), replace it with a symlink to CLAUDE.md — git rm AGENTS.md && ln -s CLAUDE.md AGENTS.md — never the reverse. A content decision about tracked files: propose it, don't do it unasked."
     AGENTS_TARGET="$AGENTS"
     if grep -qF "$OPTOUT" "$AGENTS" 2>/dev/null; then
         f_ok "agents.optout" "opt-out comment present"
     else
-        f_fail "agents.optout" "no opt-out comment. bd's first three remedies for Agent Doc Divergence are destructive here — they would overwrite the hand-written CLAUDE.md. Take option (d): append '$OPTOUT' after the END marker."
+        f_fail "agents.optout" "no opt-out comment. bd's first three remedies for Agent Doc Divergence are destructive here — they would overwrite the hand-written CLAUDE.md. Unless AGENTS.md is replaced by a symlink (agents.symlink), take option (d): append '$OPTOUT' after the END marker."
     fi
 fi
 

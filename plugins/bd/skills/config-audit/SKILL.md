@@ -552,8 +552,8 @@ Set each, then confirm with `bd config get`:
 
 - **`Agent Doc Divergence`: check for a symlink FIRST, then opt out.**
 
-  **`[ -L AGENTS.md ]` before anything else.** In 5 of my 18 projects
-  (`entwine`, `legible`, `drupal6-docker`, `registrar`, `n2y`) `AGENTS.md` is a
+  **`[ -L AGENTS.md ]` before anything else.** In 6 of my 18 projects
+  (`entwine`, `legible`, `drupal6-docker`, `registrar`, `n2y`, `ProperCourse`) `AGENTS.md` is a
   **symlink to `CLAUDE.md`**. That is bd's own option (a) — `ln -sf AGENTS.md
   CLAUDE.md` — already applied, and it *resolves* the divergence rather than
   suppressing it, because there is only one file. So on a symlinked project:
@@ -571,8 +571,32 @@ Set each, then confirm with `bd config get`:
   I got this wrong on the first two before adding the check, and had to strip
   the opt-out back out of both.
 
-  For a genuine pair of independent files, bd's warning stands and its first
-  three remedies are **destructive**: `CLAUDE.md` is the real, hand-written
+  **For a genuine pair, my preference is to make it a symlink** (settled
+  2026-10-18 on ProperCourse). I don't use Codex or OpenCode day to day;
+  `AGENTS.md` exists so I *could* switch to one if Claude Code became
+  unavailable. A second copy of the instructions only drifts — the field-testing
+  convention landed in both files there, and once inside the generated block,
+  where a refresh would have deleted it. So when `AGENTS.md` holds nothing
+  hand-written — only bd's generated blocks (`BEADS INTEGRATION`,
+  `BEADS CODEX SETUP`), bd's old whole-file template above the marker, and the
+  opt-out comment — **propose** replacing it with a link to `CLAUDE.md`:
+
+      git rm AGENTS.md && ln -s CLAUDE.md AGENTS.md && git add AGENTS.md
+
+    - **Direction matters.** `AGENTS.md` points at `CLAUDE.md`, never the
+      reverse: linking `CLAUDE.md` to `AGENTS.md` replaces the hand-written
+      project instructions with bd's primer.
+    - **Move anything hand-written** from `AGENTS.md` into `CLAUDE.md` first,
+      outside the generated block.
+    - **Do not copy the Codex setup block into `CLAUDE.md`.** It would load
+      into every Claude session for a tool I don't use. If I ever rely on Codex
+      for long, regenerate it then.
+    - It deletes a tracked, human-readable file, so propose it and wait; do not
+      do it unasked. The audit reports it as `agents.symlink`.
+
+  Until I agree, or if `AGENTS.md` does carry hand-written instructions for
+  another reader, bd's warning stands and its first three remedies are
+  **destructive**: `CLAUDE.md` is the real, hand-written
   project instruction file and may carry no bd-managed block at all, while
   `AGENTS.md` is bd's generated agent primer. Symlinking them *now*, or
   regenerating `CLAUDE.md` with `AGENTS.md` as the "source of truth", throws
