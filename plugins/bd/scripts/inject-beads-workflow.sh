@@ -30,9 +30,15 @@ shared="${CLAUDE_PLUGIN_ROOT:-}/shared/beads-pr-workflow.md"
 [ -f "$shared" ] || shared="$HOME/.claude/shared/beads-pr-workflow.md"
 [ -f "$shared" ] || exit 0
 
-# Walk up from the project dir (falls back to PWD) looking for a .beads/ dir.
+# Walk up from the project dir (falls back to PWD) looking for a .beads/ dir,
+# stopping at $HOME. $HOME/.beads is not a workspace but bd's own per-machine
+# state (machine-id, registry, eventsData), so matching it would inject the
+# guidance into every project under the home directory; and no .beads/ above
+# home belongs to a project inside it.
+home="${HOME:-}"
+home="${home%/}"
 dir="${CLAUDE_PROJECT_DIR:-$PWD}"
-while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$dir" != "$home" ]; do
     if [ -d "$dir/.beads" ]; then
         BD_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}" awk '{
             root = ENVIRON["BD_PLUGIN_ROOT"]; out = ""

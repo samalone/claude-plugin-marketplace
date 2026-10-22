@@ -125,6 +125,20 @@ dead_pid() { sh -c 'exit 0' & local p=$!; wait "$p"; echo "$p"; }
     [[ "$output" != *"@BD_PLUGIN_ROOT@"* ]]
 }
 
+@test "inject-beads-workflow: ignores bd's global ~/.beads directory" {
+    mkdir -p "$FIXTURE/home/.beads" "$FIXTURE/home/proj"
+    run bash -c "echo '{}' | HOME='$FIXTURE/home' CLAUDE_PLUGIN_ROOT='$REPO_ROOT/plugins/bd' CLAUDE_PROJECT_DIR='$FIXTURE/home/proj' '$INJECT'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "inject-beads-workflow: still finds a project's .beads under the home directory" {
+    mkdir -p "$FIXTURE/home/.beads" "$FIXTURE/home/proj/.beads" "$FIXTURE/home/proj/sub"
+    run bash -c "echo '{}' | HOME='$FIXTURE/home/' CLAUDE_PLUGIN_ROOT='$REPO_ROOT/plugins/bd' CLAUDE_PROJECT_DIR='$FIXTURE/home/proj/sub' '$INJECT'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Beads"* ]]
+}
+
 @test "bd-sync: a lock is live while its bd child is, even if the wrapper died" {
     sleep 30 & local child=$!
     mkdir "$LOCK"; { dead_pid; echo "$child"; } > "$LOCK/pid"
