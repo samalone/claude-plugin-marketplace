@@ -66,6 +66,23 @@
         "dolt",
         "issue-tracking"
       ]
+    },
+    {
+      "name": "vigilant",
+      "description": "Cross-project dependency, container-image and end-of-life tracking from Vigilant: an MCP server for project status and resolutions, a session-start brief when the current project has critical or high findings, and a skill for working through them. Self-gating: silent outside registered projects. Requires the vigilant command (uv tool install from samalone/vigilant).",
+      "source": {
+        "source": "git-subdir",
+        "url": "samalone/vigilant",
+        "path": "plugin"
+      },
+      "category": "security",
+      "tags": [
+        "security",
+        "dependencies",
+        "vulnerabilities",
+        "end-of-life",
+        "mcp"
+      ]
     }
   ]
 }

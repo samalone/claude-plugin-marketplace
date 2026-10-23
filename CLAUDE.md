@@ -20,6 +20,10 @@ Both work; pick by whether the plugin needs its own infrastructure.
   that already carry their own CI, test suite, or beads database, where folding
   them in would mean migrating that infrastructure for no gain.
   `claude-1password-plugin` is external for exactly this reason.
+  A plugin that lives in a subdirectory of another repo uses a `git-subdir`
+  source (`{"source": "git-subdir", "url": "owner/repo", "path": "plugin"}`),
+  as `vigilant` does; it installs from private repos with the user's git
+  credentials.
 
 Don't migrate an existing external plugin inward without a concrete reason. The
 reason that justified it for `beads-tools` was that the repo had been hollowed

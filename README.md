@@ -157,6 +157,21 @@ With no argument the skill reports the current mode and changes nothing.
 
 Skills cannot self-gate the way the hook does: a plugin's `skills/` directory is scanned when the plugin loads, so the skill descriptions enter every session's context, beads project or not. That cost is small — the bodies stay lazy, and `/bd:plan` and `/bd:change-mode` are hidden from the model entirely — and it buys zero per-project setup.
 
+### vigilant
+
+Cross-project dependency, container-image and end-of-life tracking. [Vigilant](https://github.com/samalone/vigilant) scans every registered project on a schedule (lockfiles with osv-scanner, deployed images with trivy, end of life with endoflife.date, third-party apt repositories for staleness) and pushes critical findings to Pushover; this plugin connects Claude Code to it.
+
+- **Category:** Security
+- **Source:** external, a subdirectory — [`samalone/vigilant/plugin`](https://github.com/samalone/vigilant/tree/main/plugin) (`git-subdir`)
+- **Install:** `/plugin install vigilant@samalone-plugins`, after `uv tool install` of the `vigilant` command itself
+
+**Components:**
+- **MCP server** (`vigilant mcp`): `project_status` and `list_findings` by repo or working directory, `list_projects`, `find_dependents`, `record_resolution`, `register_project`, `scan_project`.
+- **SessionStart hook** (`vigilant brief`): one line when the session's project has critical or high findings; silent otherwise, and silent if `vigilant` is not installed, so it is safe to enable globally.
+- **Skill** `updating-dependencies`: check status first, fix by group (lockfile, image, end of life, apt repository), confirm with `scan_project` after pushing, and record only decisions the user agrees with.
+
+It lives in the Vigilant repo rather than here because the skill's instructions must change in the same commit as the MCP tools they describe, and Vigilant carries its own tests and beads database.
+
 ## License
 
 MIT
